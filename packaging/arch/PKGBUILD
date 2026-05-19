@@ -1,0 +1,46 @@
+# Maintainer: davefx <davefx@gmail.com>
+pkgname=clipboardwire
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Clipboard-sync hub and client over WebSocket'
+arch=('x86_64')
+url='https://github.com/davefx/clipboardwire'
+license=('GPL-3.0-or-later')
+depends=()
+makedepends=('cargo')
+backup=('etc/clipboardwire/clipboardwire.env')
+# Replace `source` with a real upstream tarball / git ref before publishing.
+# For local builds, run `makepkg -e` from inside a working tree to skip
+# downloading.
+source=("$pkgname-$pkgver.tar.gz::file://$PWD/../../../target/release-tarball/$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$srcdir/$pkgname-$pkgver"
+    export CARGO_TARGET_DIR=target
+    cargo fetch --locked
+}
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    export CARGO_TARGET_DIR=target
+    cargo build --release --frozen --workspace
+}
+
+check() {
+    cd "$srcdir/$pkgname-$pkgver"
+    export CARGO_TARGET_DIR=target
+    cargo test --release --frozen --workspace
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    install -Dm755 target/release/clipboardwire "$pkgdir/usr/bin/clipboardwire"
+    install -Dm644 packaging/systemd/clipboardwire.service \
+        "$pkgdir/usr/lib/systemd/system/clipboardwire.service"
+    install -Dm644 packaging/clipboardwire.env.example \
+        "$pkgdir/etc/clipboardwire/clipboardwire.env.example"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+    install -Dm644 PROTOCOL.md "$pkgdir/usr/share/doc/$pkgname/PROTOCOL.md"
+}

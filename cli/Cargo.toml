@@ -1,0 +1,59 @@
+[package]
+name = "clipboardwire"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Clipboard-sync hub and client over WebSocket"
+homepage = "https://github.com/davefx/clipboardwire"
+repository = "https://github.com/davefx/clipboardwire"
+
+[[bin]]
+name = "clipboardwire"
+path = "src/main.rs"
+
+[dependencies]
+clipboardwire-core = { path = "../core" }
+clap = { version = "4", features = ["derive"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+
+# -- Native packaging metadata --
+# Build .deb:  cargo install cargo-deb && cargo deb -p clipboardwire
+# Build .rpm:  cargo install cargo-generate-rpm && cargo generate-rpm -p clipboardwire
+
+[package.metadata.deb]
+maintainer = "davefx <davefx@gmail.com>"
+copyright = "2026, davefx <davefx@gmail.com>"
+license-file = ["../LICENSE", "0"]
+extended-description = """\
+clipboardwire is a small clipboard-sync hub and client that relays clipboard
+contents between trusted devices on a LAN or VPN. The `serve` subcommand acts
+as the hub; `clipboardwire connect` joins it as a client."""
+section = "net"
+priority = "optional"
+depends = "$auto, systemd"
+assets = [
+    ["target/release/clipboardwire", "usr/bin/", "755"],
+    ["../packaging/systemd/clipboardwire.service", "lib/systemd/system/", "644"],
+    ["../packaging/clipboardwire.env.example", "etc/clipboardwire/clipboardwire.env.example", "644"],
+    ["../README.md", "usr/share/doc/clipboardwire/README.md", "644"],
+    ["../PROTOCOL.md", "usr/share/doc/clipboardwire/PROTOCOL.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Clipboard-sync hub and client over WebSocket"
+license = "GPL-3.0-or-later"
+url = "https://github.com/davefx/clipboardwire"
+assets = [
+    { source = "target/release/clipboardwire", dest = "/usr/bin/clipboardwire", mode = "755" },
+    { source = "packaging/systemd/clipboardwire.service", dest = "/usr/lib/systemd/system/clipboardwire.service", mode = "644" },
+    { source = "packaging/clipboardwire.env.example", dest = "/etc/clipboardwire/clipboardwire.env.example", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/clipboardwire/README.md", mode = "644", doc = true },
+    { source = "PROTOCOL.md", dest = "/usr/share/doc/clipboardwire/PROTOCOL.md", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/licenses/clipboardwire/LICENSE", mode = "644" },
+]
+[package.metadata.generate-rpm.requires]
+systemd = "*"
