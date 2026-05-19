@@ -75,7 +75,7 @@
               Id='File_License'
               Name='LICENSE.txt'
               DiskId='1'
-              Source='..\LICENSE'
+              Source='$(var.CargoTargetBinDir)\..\..\LICENSE'
               KeyPath='yes'/>
           </Component>
         </Directory>
@@ -101,6 +101,6 @@
     <UI>
       <UIRef Id='WixUI_Minimal'/>
     </UI>
-    <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf'/>
+    <WixVariable Id='WixUILicenseRtf' Value='$(var.CargoTargetBinDir)\..\..\cli\wix\License.rtf'/>
   </Product>
 </Wix>
