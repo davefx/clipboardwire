@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux artifacts (.deb, .rpm, raw binary)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-deb and cargo-generate-rpm
+        run: cargo install --locked cargo-deb cargo-generate-rpm
+
+      - name: Build release binary
+        run: cargo build --release -p clipboardwire
+
+      - name: Strip binary
+        run: strip target/release/clipboardwire
+
+      - name: Build .deb
+        run: cargo deb -p clipboardwire --no-build
+
+      - name: Build .rpm
+        run: cargo generate-rpm -p clipboardwire
+
+      - name: Rename raw binary for the release asset
+        run: |
+          mkdir -p dist
+          cp target/release/clipboardwire dist/clipboardwire-linux-x86_64
+          cp target/debian/*.deb dist/
+          cp target/generate-rpm/*.rpm dist/
+
+      - name: Upload to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+
+  windows:
+    name: Windows artifact (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release -p clipboardwire
+
+      - name: Stage artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target\release\clipboardwire.exe dist\clipboardwire-windows-x86_64.exe
+
+      - name: Upload to GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true

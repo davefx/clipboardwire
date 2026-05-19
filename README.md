@@ -94,8 +94,14 @@ clipboardwire/
 - **Phase 2 — `connect` and `host` subcommands on Linux.** Local clipboard
   polling via `arboard`; `host` runs hub and client in one process so a single
   workstation can bootstrap the network. Proves the protocol end-to-end.
-- **Phase 3 — Windows build.** Same Rust codebase, cross-built. macOS likely
-  falls out for free. Android/iOS out of scope for v0.1.
+- **Phase 3 — Windows build.** Same Rust codebase, cross-built from Linux
+  via `x86_64-pc-windows-gnu`. Produces a 3 MiB stripped `.exe` that runs
+  under wine and on real Windows; smoke-tested on this machine. macOS likely
+  falls out for free (same arboard backend, same axum stack). Android/iOS
+  out of scope for v0.1.
+
+  GitHub Actions builds for both platforms on every push and attaches
+  `.deb` / `.rpm` / `.exe` artifacts to tagged releases.
 
 ## Threat model (informal)
 

@@ -133,8 +133,20 @@ admin/admin".
   `ProtectSystem=strict`, `ProtectHome=yes`, `NoNewPrivileges=yes`, and a
   `/etc/clipboardwire/clipboardwire.env` for the user/password env vars.
   Recipes live in `packaging/`.
-- **Windows / macOS.** MSI (via `cargo-wix`) and a Homebrew formula come with
-  the client phases; not in scope for Phase 1.
+- **Windows.** Cross-compiled from Linux via the `x86_64-pc-windows-gnu`
+  target. Produces a single ~3 MiB stripped `.exe` with no DLL dependencies
+  beyond what ships with Windows. Local cross-build:
+  ```sh
+  rustup target add x86_64-pc-windows-gnu
+  sudo apt install -y gcc-mingw-w64-x86-64   # one-time
+  cargo build --release --target x86_64-pc-windows-gnu
+  ```
+  CI also produces this on every push (see §5.4). An MSI installer (via
+  `cargo-wix`) is a possible follow-up; it requires running on a Windows
+  agent because WiX Toolset is Windows-only.
+- **macOS.** Expected to fall out of the same source tree (`arboard` and the
+  axum stack both target macOS); will be wired up alongside the macOS client
+  phase.
 - **No Docker image.** The binary is small enough that direct install via a
   distro package is the supported deployment path.
 
@@ -311,12 +323,20 @@ Each subcommand:
 
 ### 5.2 CI
 
-- `cargo fmt --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- Cross-build matrix for the client: `x86_64-unknown-linux-gnu`,
-  `x86_64-pc-windows-gnu`, `x86_64-apple-darwin` (best-effort, may skip if no
-  runner).
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+- **`ci.yml`** — runs on every push to `main` and on pull requests.
+  - `lint` job (ubuntu): `cargo fmt --all -- --check` and
+    `cargo clippy --workspace --all-targets -- -D warnings`.
+  - `test` job (matrix: `ubuntu-latest`, `windows-latest`):
+    `cargo test --workspace`.
+- **`release.yml`** — runs on tagged pushes (`v*`).
+  - Linux job builds the release binary, then `cargo deb` and
+    `cargo generate-rpm`, and uploads `.deb` / `.rpm` / raw binary to the
+    GitHub release.
+  - Windows job builds the release `.exe` and uploads it.
+
+Both workflows use `Swatinem/rust-cache` for compile-time caching.
 
 ### 5.3 Observability
 
