@@ -9,7 +9,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 
 use crate::protocol::MAX_FRAME_BYTES;
 
@@ -78,8 +78,7 @@ fn resolve_password() -> Result<String> {
         }
         (Some(p), None) => Ok(p),
         (None, Some(p)) => {
-            let raw = fs::read_to_string(&p)
-                .with_context(|| format!("reading {}", p.display()))?;
+            let raw = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
             // Trim trailing newlines but keep meaningful trailing whitespace
             // out of scope — Docker-secret files are typically `printf` or
             // here-doc, which both produce a single trailing newline.

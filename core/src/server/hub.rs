@@ -119,11 +119,7 @@ impl Hub {
 
     pub(crate) fn handle(&mut self, msg: HubMessage) {
         match msg {
-            HubMessage::Register {
-                id,
-                outbound,
-                ack,
-            } => {
+            HubMessage::Register { id, outbound, ack } => {
                 if self.clients.len() >= self.max_clients {
                     warn!(client = %id, "rejecting registration: at capacity");
                     let _ = ack.send(RegisterResult::AtCapacity);

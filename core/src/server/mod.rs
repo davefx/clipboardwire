@@ -10,8 +10,8 @@ pub mod ws;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use axum::Router;
 use axum::routing::get;
+use axum::Router;
 use tokio::sync::Semaphore;
 use tracing::info;
 
@@ -86,7 +86,7 @@ async fn shutdown_signal() {
 
     #[cfg(unix)]
     let terminate = async {
-        use tokio::signal::unix::{SignalKind, signal};
+        use tokio::signal::unix::{signal, SignalKind};
         let mut sig = match signal(SignalKind::terminate()) {
             Ok(s) => s,
             Err(_) => return std::future::pending::<()>().await,

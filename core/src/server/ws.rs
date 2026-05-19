@@ -20,23 +20,22 @@ use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use futures_util::stream::StreamExt;
 use futures_util::sink::SinkExt;
-use tokio::sync::{Semaphore, mpsc};
+use futures_util::stream::StreamExt;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::interval;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::protocol::{
-    ClipFrame, ErrorCode, ErrorFrame, Frame, PROTOCOL_VERSION, SUPPORTED_CONTENT_TYPE,
-    WelcomeFrame,
+    ClipFrame, ErrorCode, ErrorFrame, Frame, WelcomeFrame, PROTOCOL_VERSION, SUPPORTED_CONTENT_TYPE,
 };
 
 use super::auth::check_basic_auth;
 use super::config::ServerConfig;
-use super::hub::{HubHandle, PER_CLIENT_CHANNEL_BUF, RegisterResult};
+use super::hub::{HubHandle, RegisterResult, PER_CLIENT_CHANNEL_BUF};
 
 /// Application state passed to every request handler.
 #[derive(Clone)]
@@ -211,9 +210,7 @@ async fn handle_socket(
                             let _ = reader_internal_tx
                                 .send(Frame::Error(ErrorFrame {
                                     code: ErrorCode::UnsupportedType,
-                                    message: format!(
-                                        "only {SUPPORTED_CONTENT_TYPE} is supported"
-                                    ),
+                                    message: format!("only {SUPPORTED_CONTENT_TYPE} is supported"),
                                 }))
                                 .await;
                             break;

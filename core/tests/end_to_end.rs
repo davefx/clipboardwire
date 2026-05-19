@@ -11,10 +11,10 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use clipboardwire_core::protocol::{
-    ClipFrame, Frame, PROTOCOL_VERSION, SUPPORTED_CONTENT_TYPE, WelcomeFrame,
+    ClipFrame, Frame, WelcomeFrame, PROTOCOL_VERSION, SUPPORTED_CONTENT_TYPE,
 };
 use clipboardwire_core::server::auth::basic_header_value;
-use clipboardwire_core::server::{ServerConfig, build_app};
+use clipboardwire_core::server::{build_app, ServerConfig};
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use tokio::net::TcpListener;

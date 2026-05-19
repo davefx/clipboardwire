@@ -6,7 +6,7 @@
 //! value (or `None`) and the configured credentials, and returns a `bool`.
 //! Wiring into axum lives in `ws.rs`.
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use subtle::ConstantTimeEq;
 
 /// Validate a `Basic` Authorization header value against configured creds.

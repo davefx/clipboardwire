@@ -86,8 +86,7 @@ async fn run_host(client_config_path: Option<&std::path::Path>) -> Result<()> {
 
     let (user, password, poll_ms) = match client_config_path {
         Some(p) => {
-            let cfg = ClientConfig::load(p)
-                .with_context(|| format!("loading {}", p.display()))?;
+            let cfg = ClientConfig::load(p).with_context(|| format!("loading {}", p.display()))?;
             (cfg.user, cfg.password, cfg.poll_ms)
         }
         None => (server_cfg.user.clone(), server_cfg.password.clone(), 300),

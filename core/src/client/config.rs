@@ -14,7 +14,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 
 fn default_poll_ms() -> u64 {
@@ -40,10 +40,10 @@ impl ClientConfig {
     /// readable by group or world on Unix (since the file holds a password).
     pub fn load(path: &Path) -> Result<Self> {
         check_perms(path)?;
-        let raw = fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let cfg: ClientConfig = toml::from_str(&raw)
-            .with_context(|| format!("parsing {}", path.display()))?;
+        let raw =
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let cfg: ClientConfig =
+            toml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))?;
         cfg.validate()?;
         Ok(cfg)
     }
@@ -58,7 +58,10 @@ impl ClientConfig {
 
     fn validate(&self) -> Result<()> {
         if !self.server.starts_with("ws://") && !self.server.starts_with("wss://") {
-            bail!("`server` must start with ws:// or wss:// (got `{}`)", self.server);
+            bail!(
+                "`server` must start with ws:// or wss:// (got `{}`)",
+                self.server
+            );
         }
         if self.user.is_empty() {
             bail!("`user` must not be empty");

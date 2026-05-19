@@ -10,8 +10,8 @@
 use std::sync::mpsc as smpsc;
 use std::time::Duration;
 
-use clipboardwire_core::client::{ClientConfig, Clipboard, run_supervisor, transport};
-use clipboardwire_core::server::{ServerConfig, build_app};
+use clipboardwire_core::client::{run_supervisor, transport, ClientConfig, Clipboard};
+use clipboardwire_core::server::{build_app, ServerConfig};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
@@ -69,12 +69,10 @@ async fn supervisor_round_trip_through_real_hub() {
         .unwrap();
 
     // B should receive an apply request with the same content within a bit.
-    let recv = tokio::task::spawn_blocking(move || {
-        b_apply_rx.recv_timeout(Duration::from_secs(3))
-    })
-    .await
-    .unwrap()
-    .expect("B should receive the relayed clip");
+    let recv = tokio::task::spawn_blocking(move || b_apply_rx.recv_timeout(Duration::from_secs(3)))
+        .await
+        .unwrap()
+        .expect("B should receive the relayed clip");
     assert_eq!(recv, "hello via the hub");
 }
 
@@ -127,11 +125,9 @@ async fn late_joiner_supervisor_applies_cached_clip() {
     let (b_transport, _) = transport::spawn(make_cfg());
     tokio::spawn(async move { run_supervisor(b_clipboard, b_transport).await });
 
-    let recv = tokio::task::spawn_blocking(move || {
-        b_apply_rx.recv_timeout(Duration::from_secs(3))
-    })
-    .await
-    .unwrap()
-    .expect("late joiner should apply cached clip");
+    let recv = tokio::task::spawn_blocking(move || b_apply_rx.recv_timeout(Duration::from_secs(3)))
+        .await
+        .unwrap()
+        .expect("late joiner should apply cached clip");
     assert_eq!(recv, "cached");
 }

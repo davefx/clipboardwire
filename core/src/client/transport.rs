@@ -13,13 +13,13 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{anyhow, bail, Result};
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::protocol::{ClipFrame, Frame};
