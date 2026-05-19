@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#[cfg(windows)]
+mod tray;
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -16,6 +19,12 @@ struct Cli {
     /// Path to the client config file (used by `connect` and `host`).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
+
+    /// Show a system-tray icon while running. Windows-only in v0.1;
+    /// on other platforms this falls back to the headless mode with a
+    /// warning.
+    #[arg(long, global = true)]
+    tray: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -42,20 +51,37 @@ async fn main() -> Result<()> {
 
     match cmd {
         Command::Serve => {
+            if cli.tray {
+                tracing::warn!("`--tray` is ignored in serve mode");
+            }
             let cfg = ServerConfig::from_env()?;
             clipboardwire_core::server::run(cfg).await
         }
         Command::Connect => {
             let cfg = load_client_config(cli.config.as_deref())?;
-            tokio::select! {
-                res = clipboardwire_core::client::run(cfg) => res,
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("shutting down");
-                    Ok(())
-                }
-            }
+            run_client(cfg, cli.tray).await
         }
-        Command::Host => run_host(cli.config.as_deref()).await,
+        Command::Host => run_host(cli.config.as_deref(), cli.tray).await,
+    }
+}
+
+async fn run_client(cfg: ClientConfig, tray: bool) -> Result<()> {
+    if tray {
+        #[cfg(windows)]
+        {
+            return tray::run(cfg).await;
+        }
+        #[cfg(not(windows))]
+        {
+            tracing::warn!("--tray is Windows-only in v0.1; running headless");
+        }
+    }
+    tokio::select! {
+        res = clipboardwire_core::client::run(cfg) => res,
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("shutting down");
+            Ok(())
+        }
     }
 }
 
@@ -76,7 +102,7 @@ fn load_client_config(override_path: Option<&std::path::Path>) -> Result<ClientC
 /// poll_ms come from there; the `server` URL field is ignored and we use
 /// `ws://127.0.0.1:<bound_port>/sync` instead. With no `--config`, we derive
 /// the client credentials from the same env vars the server reads.
-async fn run_host(client_config_path: Option<&std::path::Path>) -> Result<()> {
+async fn run_host(client_config_path: Option<&std::path::Path>, tray: bool) -> Result<()> {
     let server_cfg = ServerConfig::from_env()?;
     let (listener, addr) = clipboardwire_core::server::bind(&server_cfg).await?;
     tracing::info!(addr = %addr, "hub listening (host mode)");
@@ -114,15 +140,15 @@ async fn run_host(client_config_path: Option<&std::path::Path>) -> Result<()> {
     let server_task = tokio::spawn(async move {
         clipboardwire_core::server::serve(listener, server_cfg, std::future::pending()).await
     });
-    let client_task =
-        tokio::spawn(async move { clipboardwire_core::client::run(client_cfg).await });
+
+    let client_future = run_client(client_cfg, tray);
 
     tokio::select! {
         res = server_task => {
             res.context("server task panicked")??;
         }
-        res = client_task => {
-            res.context("client task panicked")??;
+        res = client_future => {
+            res?;
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("shutting down");

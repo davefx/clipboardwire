@@ -1,0 +1,107 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<!--
+  clipboardwire WiX 3 source.
+
+  Builds a per-machine x64 MSI that installs `clipboardwire.exe` to
+  `%ProgramFiles%\clipboardwire\` and prepends the install dir to the system
+  PATH so users can run `clipboardwire connect --tray` from any shell.
+
+  Build:  cargo wix -p clipboardwire --nocapture
+  CI invocation is in .github/workflows/release.yml.
+
+  GUID policy:
+  * `UpgradeCode` is stable forever — never change it (rotating it breaks
+    MSI's upgrade detection).
+  * Per-component GUIDs are stable per file path; keep them stable across
+    versions so `MajorUpgrade` removes the old before installing the new.
+
+  License: GPL-3.0-or-later. SPDX-License-Identifier: GPL-3.0-or-later.
+-->
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+  <Product
+    Id='*'
+    Name='clipboardwire'
+    UpgradeCode='44487CCC-DAC6-46DA-A956-EC472C1EE7C6'
+    Manufacturer='davefx'
+    Language='1033'
+    Codepage='1252'
+    Version='$(var.Version)'>
+
+    <Package
+      Id='*'
+      Keywords='Installer'
+      Description='clipboardwire — clipboard sync over WebSocket'
+      Manufacturer='davefx'
+      InstallerVersion='450'
+      Languages='1033'
+      Compressed='yes'
+      InstallScope='perMachine'
+      SummaryCodepage='1252'/>
+
+    <MajorUpgrade
+      Schedule='afterInstallInitialize'
+      DowngradeErrorMessage='A newer version of clipboardwire is already installed.'/>
+
+    <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
+    <Property Id='DiskPrompt' Value='clipboardwire Installation'/>
+
+    <Directory Id='TARGETDIR' Name='SourceDir'>
+      <Directory Id='ProgramFiles64Folder' Name='PFiles'>
+        <Directory Id='APPLICATIONFOLDER' Name='clipboardwire'>
+          <Component
+            Id='Cmp_Binary'
+            Guid='12B24AAB-A7DC-4563-B752-21DAACE69753'
+            Win64='yes'>
+            <File
+              Id='File_Binary'
+              Name='clipboardwire.exe'
+              DiskId='1'
+              Source='$(var.CargoTargetBinDir)\clipboardwire.exe'
+              KeyPath='yes'/>
+            <Environment
+              Id='PATH'
+              Name='PATH'
+              Value='[APPLICATIONFOLDER]'
+              Permanent='no'
+              Part='last'
+              Action='set'
+              System='yes'/>
+          </Component>
+
+          <Component
+            Id='Cmp_License'
+            Guid='3FD015D7-36E8-4642-88BC-6D9D2274FBC7'
+            Win64='yes'>
+            <File
+              Id='File_License'
+              Name='LICENSE.txt'
+              DiskId='1'
+              Source='..\LICENSE'
+              KeyPath='yes'/>
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature
+      Id='Binaries'
+      Title='clipboardwire'
+      Description='The clipboardwire binary and its license.'
+      Level='1'
+      ConfigurableDirectory='APPLICATIONFOLDER'
+      AllowAdvertise='no'
+      Display='expand'
+      Absent='disallow'>
+      <ComponentRef Id='Cmp_Binary'/>
+      <ComponentRef Id='Cmp_License'/>
+    </Feature>
+
+    <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+    <Property Id='ARPHELPLINK' Value='https://github.com/davefx/clipboardwire'/>
+
+    <UI>
+      <UIRef Id='WixUI_Minimal'/>
+    </UI>
+    <WixVariable Id='WixUILicenseRtf' Value='wix\License.rtf'/>
+  </Product>
+</Wix>

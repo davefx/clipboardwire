@@ -48,21 +48,29 @@ jobs:
           fail_on_unmatched_files: true
 
   windows:
-    name: Windows artifact (.exe)
+    name: Windows artifacts (.exe and .msi)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install cargo-wix
+        run: cargo install --locked cargo-wix
+
       - name: Build release binary
         run: cargo build --release -p clipboardwire
 
-      - name: Stage artifact
+      - name: Build MSI
+        # `--no-build` reuses the binary we built in the previous step.
+        run: cargo wix -p clipboardwire --no-build --nocapture
+
+      - name: Stage artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item target\release\clipboardwire.exe dist\clipboardwire-windows-x86_64.exe
+          Copy-Item target\wix\*.msi dist\
 
       - name: Upload to GitHub release
         uses: softprops/action-gh-release@v2

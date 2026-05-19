@@ -20,6 +20,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.22"
+
 # -- Native packaging metadata --
 # Build .deb:  cargo install cargo-deb && cargo deb -p clipboardwire
 # Build .rpm:  cargo install cargo-generate-rpm && cargo generate-rpm -p clipboardwire

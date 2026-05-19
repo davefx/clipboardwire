@@ -137,16 +137,18 @@ admin/admin".
   `/etc/clipboardwire/clipboardwire.env` for the user/password env vars.
   Recipes live in `packaging/`.
 - **Windows.** Cross-compiled from Linux via the `x86_64-pc-windows-gnu`
-  target. Produces a single ~3 MiB stripped `.exe` with no DLL dependencies
+  target. Produces a single ~7 MiB stripped `.exe` with no DLL dependencies
   beyond what ships with Windows. Local cross-build:
   ```sh
   rustup target add x86_64-pc-windows-gnu
   sudo apt install -y gcc-mingw-w64-x86-64   # one-time
   cargo build --release --target x86_64-pc-windows-gnu
   ```
-  CI also produces this on every push (see §5.4). An MSI installer (via
-  `cargo-wix`) is a possible follow-up; it requires running on a Windows
-  agent because WiX Toolset is Windows-only.
+  An MSI installer is produced by `cargo wix` on the windows-latest CI
+  runner; the WiX 3 source lives in `cli/wix/main.wxs`. The MSI installs to
+  `%ProgramFiles%\clipboardwire\`, drops a license file alongside the
+  binary, and prepends that directory to the system `PATH`. The
+  `UpgradeCode` is stable so future versions upgrade in place.
 - **macOS.** Expected to fall out of the same source tree (`arboard` and the
   axum stack both target macOS); will be wired up alongside the macOS client
   phase.
@@ -272,7 +274,26 @@ too. Settle on one in implementation.)
 - **macOS.** `arboard` uses NSPasteboard. Polling against `changeCount` is
   cheap. Should work without changes.
 
-### 3.6 Supervisor
+### 3.6 Tray UI (Windows)
+
+A thin Windows-only wrapper around the headless supervisor, gated by
+`#[cfg(windows)]` in `cli/src/tray.rs`. Builds a `tray_icon::TrayIcon` with
+a placeholder icon (drawn programmatically — no asset shipped) and a
+single "Quit" menu item, then spawns `client::run` as a tokio task and
+multiplexes three sources via `tokio::select!`:
+
+1. The supervisor's `JoinHandle` (returns when the client exits).
+2. `MenuEvent::receiver()` (polled every 100 ms — the receiver is a
+   `crossbeam_channel` so we can't await it directly).
+3. `tokio::signal::ctrl_c()` for clean shutdown from a terminal.
+
+The Linux build sees `cfg(not(windows))` for the module; the `--tray` flag
+falls through to the headless code path with a one-line warning. Adding a
+cross-platform tray would mean either splitting the Linux distro package
+in two (server-only vs. desktop) or forcing a GTK dep on headless servers
+— deferred to v0.2.
+
+### 3.7 Supervisor
 
 `client::run` owns a small supervisor:
 
@@ -385,7 +406,9 @@ sudo systemctl enable --now clipboardwire
 
 ## 7. Out of scope for v0.1 (intentionally)
 
-- Tray UI on any platform.
+- Cross-platform tray UI on Linux/macOS (Windows ships in v0.1; Linux deferred
+  due to libgtk/libappindicator runtime deps that would either split the
+  Linux package or force a GTK dep on headless servers).
 - Image / file clipboard payloads (protocol bump required).
 - Multi-user / per-room separation.
 - TLS in the server (use a reverse proxy).

@@ -131,13 +131,15 @@ clipboardwire/
   polling via `arboard`; `host` runs hub and client in one process so a single
   workstation can bootstrap the network. Proves the protocol end-to-end.
 - **Phase 3 — Windows build.** Same Rust codebase, cross-built from Linux
-  via `x86_64-pc-windows-gnu`. Produces a 3 MiB stripped `.exe` that runs
-  under wine and on real Windows; smoke-tested on this machine. macOS likely
-  falls out for free (same arboard backend, same axum stack). Android/iOS
-  out of scope for v0.1.
+  via `x86_64-pc-windows-gnu`. Produces a 7 MiB stripped `.exe`, plus an
+  `.msi` installer (cargo-wix on the GitHub Windows runner) that installs
+  to `Program Files\clipboardwire\` and prepends the directory to system
+  `PATH`. A Windows system-tray UI ships with the same binary — invoke
+  `clipboardwire connect --tray` to run with a tray icon and a Quit menu.
+  macOS likely falls out for free; Android/iOS out of scope for v0.1.
 
   GitHub Actions builds for both platforms on every push and attaches
-  `.deb` / `.rpm` / `.exe` artifacts to tagged releases.
+  `.deb` / `.rpm` / `.exe` / `.msi` artifacts to tagged releases.
 
 ## Threat model (informal)
 
