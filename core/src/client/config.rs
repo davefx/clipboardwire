@@ -86,6 +86,50 @@ impl ClientConfig {
         }
     }
 
+    /// Write a placeholder config to `path`, creating parent directories as
+    /// needed. The file is `chmod 0600` on Unix and contains comments
+    /// pointing at each setting. Used on first run to bootstrap a new
+    /// install — see `cli/src/main.rs`.
+    pub fn write_template(path: &Path) -> Result<()> {
+        const TEMPLATE: &str = "# clipboardwire client config\n\
+            # Edit this file with your hub's URL and credentials, then re-run.\n\
+            \n\
+            # WebSocket endpoint. Use wss:// when the hub has TLS configured.\n\
+            server   = \"wss://CHANGE-ME-host.lan:8484/sync\"\n\
+            \n\
+            # HTTP Basic credentials, shared with the hub's\n\
+            # CLIPBOARDWIRE_USER / CLIPBOARDWIRE_PASSWORD env vars.\n\
+            user     = \"CHANGE-ME\"\n\
+            password = \"CHANGE-ME\"\n\
+            \n\
+            # Optional: clipboard polling interval in milliseconds (default 300).\n\
+            # poll_ms = 300\n\
+            \n\
+            # Optional: PEM bundle of extra CAs to trust (e.g. your private CA).\n\
+            # tls_ca_file = \"C:\\\\path\\\\to\\\\ca.crt\"\n\
+            \n\
+            # Set to true only on a fully trusted LAN/VPN with a self-signed\n\
+            # server cert. Skips all TLS certificate verification.\n\
+            # tls_insecure = true\n";
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        }
+        fs::write(path, TEMPLATE)
+            .with_context(|| format!("writing template to {}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path)
+                .with_context(|| format!("stat {}", path.display()))?
+                .permissions();
+            perms.set_mode(0o600);
+            fs::set_permissions(path, perms)
+                .with_context(|| format!("chmod 600 {}", path.display()))?;
+        }
+        Ok(())
+    }
+
     fn validate(&self) -> Result<()> {
         if !self.server.starts_with("ws://") && !self.server.starts_with("wss://") {
             bail!(
@@ -224,6 +268,55 @@ mod tests {
         let err = ClientConfig::load(&path).unwrap_err();
         assert!(format!("{err:#}").contains("password"));
         fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn write_template_creates_parent_and_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "clipboardwire-template-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("nested").join("config.toml");
+        let _ = fs::remove_dir_all(&dir);
+
+        ClientConfig::write_template(&path).expect("template write");
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("CHANGE-ME"));
+        assert!(content.contains("server"));
+
+        // The template itself should parse minus the CHANGE-ME placeholders —
+        // i.e. it's syntactically valid TOML that would just fail validation.
+        let parsed: Result<ClientConfig, _> = toml::from_str(&content);
+        assert!(parsed.is_ok(), "template should be valid TOML");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn write_template_sets_0600_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "clipboardwire-template-mode-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.toml");
+        let _ = fs::remove_dir_all(&dir);
+
+        ClientConfig::write_template(&path).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "template should be chmod 600");
+
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -57,17 +57,18 @@ async fn main() -> Result<()> {
             clipboardwire_core::server::run(cfg).await
         }
         Command::Connect => {
-            let cfg = load_client_config(cli.config.as_deref())?;
-            run_client(cfg, cli.tray).await
+            if cli.tray {
+                run_connect_tray(cli.config.as_deref()).await
+            } else {
+                let cfg = load_client_config_or_bail(cli.config.as_deref())?;
+                run_client_headless(cfg).await
+            }
         }
         Command::Host => run_host(cli.config.as_deref(), cli.tray).await,
     }
 }
 
-async fn run_client(cfg: ClientConfig, tray: bool) -> Result<()> {
-    if tray {
-        return tray::run(cfg).await;
-    }
+async fn run_client_headless(cfg: ClientConfig) -> Result<()> {
     tokio::select! {
         res = clipboardwire_core::client::run(cfg) => res,
         _ = tokio::signal::ctrl_c() => {
@@ -77,12 +78,75 @@ async fn run_client(cfg: ClientConfig, tray: bool) -> Result<()> {
     }
 }
 
-fn load_client_config(override_path: Option<&std::path::Path>) -> Result<ClientConfig> {
+/// Tray mode for `connect`: the tray icon must come up even if the config
+/// is missing or invalid, so the user has a discoverable way to fix it.
+/// Compute the path, write a placeholder if nothing's there yet, then hand
+/// off to the tray with the optional parsed config.
+async fn run_connect_tray(override_path: Option<&std::path::Path>) -> Result<()> {
     let path = match override_path {
         Some(p) => p.to_path_buf(),
         None => ClientConfig::default_path()
             .context("could not determine the default client config path")?,
     };
+
+    if override_path.is_none() && !path.exists() {
+        if let Err(e) = ClientConfig::write_template(&path) {
+            tracing::warn!(
+                error = %format!("{e:#}"),
+                "could not write template config at {}",
+                path.display()
+            );
+        } else {
+            tracing::info!(
+                "no client config found; wrote a placeholder at {} — use the \
+                 tray menu's \"Edit config\" item to set the server URL and password",
+                path.display()
+            );
+        }
+    }
+
+    let cfg = match ClientConfig::load(&path) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(
+                error = %format!("{e:#}"),
+                "no usable client config yet; tray will come up in needs-config state"
+            );
+            None
+        }
+    };
+
+    tray::run(path, cfg).await
+}
+
+/// Headless config loader: hard-errors if the file is missing. When the
+/// user is at a terminal (no `--tray`) the diagnostic message is the right
+/// thing to surface, and we write a template at the default path so they
+/// have something to edit.
+fn load_client_config_or_bail(override_path: Option<&std::path::Path>) -> Result<ClientConfig> {
+    let (path, using_default) = match override_path {
+        Some(p) => (p.to_path_buf(), false),
+        None => (
+            ClientConfig::default_path()
+                .context("could not determine the default client config path")?,
+            true,
+        ),
+    };
+
+    if using_default && !path.exists() {
+        ClientConfig::write_template(&path)
+            .with_context(|| format!("writing template config at {}", path.display()))?;
+        tracing::warn!(
+            "no client config found; wrote a template to {} — edit it (set the server URL \
+             and password) and re-run",
+            path.display()
+        );
+        anyhow::bail!(
+            "config missing; template written to {} — edit it and re-run",
+            path.display()
+        );
+    }
+
     ClientConfig::load(&path)
         .with_context(|| format!("loading client config at {}", path.display()))
 }
@@ -133,7 +197,18 @@ async fn run_host(client_config_path: Option<&std::path::Path>, tray: bool) -> R
         clipboardwire_core::server::serve(listener, server_cfg, std::future::pending()).await
     });
 
-    let client_future = run_client(client_cfg, tray);
+    // host mode always has a valid in-memory client config (derived from
+    // the server's env vars + optional override). Hand it to the tray if
+    // requested; otherwise run headless. The tray's "needs config" state
+    // shouldn't normally be reachable here.
+    let client_future = async move {
+        if tray {
+            let path = ClientConfig::default_path().unwrap_or_else(|_| "host-mode".into());
+            tray::run(path, Some(client_cfg)).await
+        } else {
+            run_client_headless(client_cfg).await
+        }
+    };
 
     tokio::select! {
         res = server_task => {
