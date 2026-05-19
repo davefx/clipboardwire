@@ -58,12 +58,35 @@ impl ClientConfig {
         Ok(cfg)
     }
 
-    /// Platform-default path. On Linux: `$XDG_CONFIG_HOME/clipboardwire/config.toml`
-    /// or `~/.config/clipboardwire/config.toml`.
+    /// Platform-default path for the client config file:
+    ///
+    /// - Linux:   `$XDG_CONFIG_HOME/clipboardwire/config.toml`
+    ///            (falls back to `~/.config/clipboardwire/config.toml`)
+    /// - macOS:   `~/Library/Application Support/clipboardwire/config.toml`
+    /// - Windows: `%APPDATA%\clipboardwire\config.toml`
+    ///
+    /// The Windows layout intentionally avoids `directories::ProjectDirs`'
+    /// default nested `\config\` subdirectory — `%APPDATA%\clipboardwire\config\config.toml`
+    /// reads as redundant and surprises Windows users. Linux/macOS keep
+    /// their XDG-compliant locations via `BaseDirs::config_dir()`.
     pub fn default_path() -> Result<PathBuf> {
-        let dirs = directories::ProjectDirs::from("", "", "clipboardwire")
-            .ok_or_else(|| anyhow!("could not locate the user's config directory"))?;
-        Ok(dirs.config_dir().join("config.toml"))
+        #[cfg(windows)]
+        {
+            let appdata = std::env::var_os("APPDATA")
+                .ok_or_else(|| anyhow!("APPDATA environment variable is not set"))?;
+            Ok(PathBuf::from(appdata)
+                .join("clipboardwire")
+                .join("config.toml"))
+        }
+        #[cfg(not(windows))]
+        {
+            let base = directories::BaseDirs::new()
+                .ok_or_else(|| anyhow!("could not locate the user's config directory"))?;
+            Ok(base
+                .config_dir()
+                .join("clipboardwire")
+                .join("config.toml"))
+        }
     }
 
     fn validate(&self) -> Result<()> {
