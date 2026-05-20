@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Result};
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
@@ -34,6 +34,21 @@ const RESET_AFTER_STABLE: Duration = Duration::from_secs(30);
 const INBOUND_BUF: usize = 32;
 const OUTBOUND_BUF: usize = 8;
 
+/// Connection-state snapshot the transport emits via the optional
+/// `status_tx` watch channel passed to [`spawn_with_status`]. The tray
+/// uses this to surface "connecting", "connected", "disconnected" in
+/// the menu + tooltip without having to poll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientStatus {
+    /// Connect attempt in progress.
+    Connecting,
+    /// Welcome frame received; relaying clipboard traffic.
+    Connected,
+    /// Last connection ended (clean or with an error); will retry after
+    /// `will_retry_in`. The duration mirrors the next backoff sleep.
+    Disconnected { will_retry_in: Duration },
+}
+
 /// Handle held by the supervisor.
 pub struct Transport {
     /// Inbound `clip` frames from the hub (other peers' publishes plus, on
@@ -46,10 +61,20 @@ pub struct Transport {
 /// Spawn the transport task. Returns the supervisor-facing handle and a join
 /// handle for orderly shutdown (abort it to disconnect cleanly).
 pub fn spawn(config: ClientConfig) -> (Transport, JoinHandle<()>) {
+    spawn_with_status(config, None)
+}
+
+/// Like [`spawn`] but additionally accepts a `watch::Sender` that the
+/// task uses to report [`ClientStatus`] transitions. Pass `None` if the
+/// caller doesn't need status updates (the headless-server case).
+pub fn spawn_with_status(
+    config: ClientConfig,
+    status_tx: Option<watch::Sender<ClientStatus>>,
+) -> (Transport, JoinHandle<()>) {
     let (inbound_tx, inbound_rx) = mpsc::channel::<ClipFrame>(INBOUND_BUF);
     let (outbound_tx, outbound_rx) = mpsc::channel::<ClipFrame>(OUTBOUND_BUF);
     let join = tokio::spawn(async move {
-        run_loop(config, inbound_tx, outbound_rx).await;
+        run_loop(config, inbound_tx, outbound_rx, status_tx).await;
     });
     (
         Transport {
@@ -65,11 +90,20 @@ async fn run_loop(
     config: ClientConfig,
     inbound_tx: mpsc::Sender<ClipFrame>,
     mut outbound_rx: mpsc::Receiver<ClipFrame>,
+    status_tx: Option<watch::Sender<ClientStatus>>,
 ) {
+    let emit = |s: ClientStatus| {
+        if let Some(tx) = status_tx.as_ref() {
+            // send_replace is fine even when there are no receivers;
+            // the watch is "latest state," nobody starves.
+            let _ = tx.send(s);
+        }
+    };
     let mut backoff = INITIAL_BACKOFF;
     loop {
+        emit(ClientStatus::Connecting);
         let attempt_start = Instant::now();
-        match connect_and_serve(&config, &inbound_tx, &mut outbound_rx).await {
+        match connect_and_serve(&config, &inbound_tx, &mut outbound_rx, status_tx.as_ref()).await {
             Ok(()) => debug!("connection ended cleanly"),
             Err(e) => warn!(error = %format!("{e:#}"), "connection error"),
         }
@@ -77,6 +111,9 @@ async fn run_loop(
         if attempt_start.elapsed() >= RESET_AFTER_STABLE {
             backoff = INITIAL_BACKOFF;
         }
+        emit(ClientStatus::Disconnected {
+            will_retry_in: backoff,
+        });
         debug!(sleep_s = backoff.as_secs_f64(), "reconnecting");
         tokio::time::sleep(backoff).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
@@ -87,6 +124,7 @@ async fn connect_and_serve(
     config: &ClientConfig,
     inbound_tx: &mpsc::Sender<ClipFrame>,
     outbound_rx: &mut mpsc::Receiver<ClipFrame>,
+    status_tx: Option<&watch::Sender<ClientStatus>>,
 ) -> Result<()> {
     let mut req = config
         .server
@@ -107,6 +145,9 @@ async fn connect_and_serve(
         tokio_tungstenite::connect_async(req).await?
     };
     info!("connected");
+    if let Some(tx) = status_tx {
+        let _ = tx.send(ClientStatus::Connected);
+    }
     let (mut sink, mut stream) = ws.split();
 
     // First frame must be `welcome`.

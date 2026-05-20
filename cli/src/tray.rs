@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::Child;
 
 use anyhow::{Context, Result};
-use clipboardwire_core::client::ClientConfig;
+use clipboardwire_core::client::{ClientConfig, ClientStatus};
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tokio::runtime::{Handle, Runtime};
@@ -49,12 +49,22 @@ enum UserEvent {
     /// The settings subprocess exited (Save or Cancel). Triggers an
     /// automatic reload of the config + restart of running tasks.
     SettingsExited,
+    /// The client transport reported a connection-state transition for
+    /// the supervisor identified by `generation`. Stale events from
+    /// previous-generation supervisors are filtered out at the loop.
+    ClientStatusChanged {
+        generation: u64,
+        status: ClientStatus,
+    },
 }
 
 /// Tray-level handles that need to outlive a Reload event.
 struct State {
     supervisor: Option<JoinHandle<Result<()>>>,
     supervisor_gen: u64,
+    /// Last status reported by the current-generation supervisor.
+    /// `None` when no supervisor is running (e.g. needs-config).
+    client_status: Option<ClientStatus>,
     /// The embedded hub spawned from `[hub]` in the client config.
     embedded_hub: Option<JoinHandle<Result<()>>>,
     embedded_hub_gen: u64,
@@ -88,6 +98,10 @@ pub fn run(
     let proxy = event_loop.create_proxy();
 
     let menu = Menu::new();
+    // The top "Status: …" line is informational (always disabled) — it
+    // reflects whatever the client transport last reported via watch.
+    let status_item = MenuItem::new(status_label_for(None, false), false, None);
+    let sep0 = PredefinedMenuItem::separator();
     let edit_item = MenuItem::new("Edit config…", true, None);
     let reload_item = MenuItem::new("Reload config", true, None);
     let sep1 = PredefinedMenuItem::separator();
@@ -96,6 +110,8 @@ pub fn run(
     let restart_hub_item = MenuItem::new("Restart hub", false, None);
     let sep2 = PredefinedMenuItem::separator();
     let quit_item = MenuItem::new("Quit clipboardwire", true, None);
+    menu.append(&status_item)?;
+    menu.append(&sep0)?;
     menu.append(&edit_item)?;
     menu.append(&reload_item)?;
     menu.append(&sep1)?;
@@ -144,6 +160,7 @@ pub fn run(
     let mut state = State {
         supervisor: None,
         supervisor_gen: 0,
+        client_status: None,
         embedded_hub: None,
         embedded_hub_gen: 0,
         settings_alive: false,
@@ -153,6 +170,7 @@ pub fn run(
     // Spawn supervisor + auto-start hub from the initial config.
     apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+    update_status_item(&status_item, &state);
 
     // First-run / no-valid-config flow: pop the settings GUI so the
     // user has somewhere obvious to fix things from.
@@ -222,13 +240,13 @@ pub fn run(
                 summary,
             }) if Some(generation) == current_supervisor_gen(&state) => {
                 state.supervisor = None;
+                state.client_status = None;
                 warn!(
                     gen = generation,
                     summary, "supervisor exited on its own; staying in tray"
                 );
-                let _ = tray.set_tooltip(Some(format!(
-                    "clipboardwire — disconnected ({summary}). Right-click → Reload config"
-                )));
+                update_status_item(&status_item, &state);
+                refresh_tooltip(&tray, &state, &config_path);
             }
             Event::UserEvent(UserEvent::HubExited {
                 generation,
@@ -238,6 +256,13 @@ pub fn run(
                 warn!(gen = generation, summary, "embedded hub exited on its own");
                 update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
             }
+            Event::UserEvent(UserEvent::ClientStatusChanged { generation, status })
+                if generation == state.supervisor_gen =>
+            {
+                state.client_status = Some(status);
+                update_status_item(&status_item, &state);
+                refresh_tooltip(&tray, &state, &config_path);
+            }
             Event::UserEvent(UserEvent::SettingsExited) => {
                 info!("settings dialog closed; auto-reloading config");
                 state.settings_alive = false;
@@ -245,6 +270,8 @@ pub fn run(
                 reload_config_into(&mut state, &config_path);
                 apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
                 update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+                update_status_item(&status_item, &state);
+                refresh_tooltip(&tray, &state, &config_path);
             }
             _ => {}
         }
@@ -268,6 +295,7 @@ fn abort_running(state: &mut State) {
     if let Some(h) = state.embedded_hub.take() {
         h.abort();
     }
+    state.client_status = None;
 }
 
 fn reload_config_into(state: &mut State, config_path: &Path) {
@@ -297,10 +325,7 @@ fn apply_loaded_config(
     tray: &TrayIcon,
 ) {
     let Some(client_cfg_orig) = state.cfg.clone() else {
-        let _ = tray.set_tooltip(Some(format!(
-            "clipboardwire — config invalid (right-click → Edit config)\n{}",
-            config_path.display()
-        )));
+        refresh_tooltip(tray, state, config_path);
         return;
     };
 
@@ -322,10 +347,31 @@ fn apply_loaded_config(
 
     state.supervisor_gen += 1;
     let gen = state.supervisor_gen;
+    let proxy_for_status = proxy.clone();
+    let (status_tx, mut status_rx) = tokio::sync::watch::channel(ClientStatus::Connecting);
+    // Forwarder: every watch change → UserEvent so the tao loop wakes
+    // up and updates the menu/tooltip. Lives until the supervisor
+    // exits and drops the sender, at which point `changed().await`
+    // returns Err and we break.
+    handle.spawn(async move {
+        let initial = *status_rx.borrow_and_update();
+        let _ = proxy_for_status.send_event(UserEvent::ClientStatusChanged {
+            generation: gen,
+            status: initial,
+        });
+        while status_rx.changed().await.is_ok() {
+            let s = *status_rx.borrow_and_update();
+            let _ = proxy_for_status.send_event(UserEvent::ClientStatusChanged {
+                generation: gen,
+                status: s,
+            });
+        }
+    });
+
     let proxy_clone = proxy.clone();
     let client_cfg_for_log = client_cfg.clone();
     let sup = handle.spawn(async move {
-        let result = clipboardwire_core::client::run(client_cfg).await;
+        let result = clipboardwire_core::client::run_with_status(client_cfg, Some(status_tx)).await;
         let summary = match &result {
             Ok(()) => "clean exit".to_string(),
             Err(e) => format!("{e:#}"),
@@ -337,11 +383,9 @@ fn apply_loaded_config(
         result
     });
     state.supervisor = Some(sup);
-
-    let _ = tray.set_tooltip(Some(format!(
-        "clipboardwire — {}",
-        client_cfg_for_log.server
-    )));
+    state.client_status = Some(ClientStatus::Connecting);
+    let _ = client_cfg_for_log;
+    refresh_tooltip(tray, state, config_path);
 }
 
 /// Start the embedded hub from `state.cfg.hub`. Returns Err if no hub
@@ -440,6 +484,51 @@ fn update_hub_menu(state: &State, start: &MenuItem, stop: &MenuItem, restart: &M
     start.set_enabled(has_hub_section && !running);
     stop.set_enabled(has_hub_section && running);
     restart.set_enabled(has_hub_section && running);
+}
+
+/// Refresh the disabled "Status: …" menu item text from the current state.
+fn update_status_item(item: &MenuItem, state: &State) {
+    item.set_text(status_label_for(state.client_status, state.cfg.is_some()));
+}
+
+/// Render the user-facing status label. Kept short + prefix-stable so
+/// the menu doesn't reflow on every status change.
+fn status_label_for(status: Option<ClientStatus>, has_cfg: bool) -> String {
+    if !has_cfg {
+        return "Status: needs configuration".to_string();
+    }
+    match status {
+        None => "Status: starting…".to_string(),
+        Some(ClientStatus::Connecting) => "Status: connecting…".to_string(),
+        Some(ClientStatus::Connected) => "Status: connected".to_string(),
+        Some(ClientStatus::Disconnected { will_retry_in }) => format!(
+            "Status: disconnected — retrying in {}s",
+            will_retry_in.as_secs().max(1)
+        ),
+    }
+}
+
+/// Refresh the tray tooltip from current state.
+fn refresh_tooltip(tray: &TrayIcon, state: &State, config_path: &Path) {
+    let tip = match (&state.cfg, state.client_status) {
+        (None, _) => format!(
+            "clipboardwire — needs config (right-click → Edit config)\n{}",
+            config_path.display()
+        ),
+        (Some(cfg), None) => format!("clipboardwire — starting\n{}", cfg.server),
+        (Some(cfg), Some(ClientStatus::Connecting)) => {
+            format!("clipboardwire — connecting…\n{}", cfg.server)
+        }
+        (Some(cfg), Some(ClientStatus::Connected)) => {
+            format!("clipboardwire — connected\n{}", cfg.server)
+        }
+        (Some(cfg), Some(ClientStatus::Disconnected { will_retry_in })) => format!(
+            "clipboardwire — disconnected, retrying in {}s\n{}",
+            will_retry_in.as_secs().max(1),
+            cfg.server
+        ),
+    };
+    let _ = tray.set_tooltip(Some(tip));
 }
 
 /// Launch `clipboardwire settings --config <path>` as a subprocess.

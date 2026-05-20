@@ -17,15 +17,25 @@ use crate::protocol::{is_text_content_type, ClipFrame, IMAGE_PNG_CONTENT_TYPE, T
 
 pub use clipboard::{ClipChange, Clipboard, ImageBytes};
 pub use config::ClientConfig;
-pub use transport::Transport;
+pub use transport::{ClientStatus, Transport};
 
 /// Run the clipboard client until the process is signalled or an unrecoverable
 /// error occurs. Spawns the arboard thread, the transport task, and bridges
 /// them in a single select loop.
 pub async fn run(config: ClientConfig) -> Result<()> {
+    run_with_status(config, None).await
+}
+
+/// Variant of [`run`] that emits [`ClientStatus`] transitions to the
+/// provided `watch::Sender`. The tray uses this to surface connection
+/// state in the menu and tooltip.
+pub async fn run_with_status(
+    config: ClientConfig,
+    status_tx: Option<tokio::sync::watch::Sender<ClientStatus>>,
+) -> Result<()> {
     let poll_ms = config.poll_ms;
     let (clipboard, _clipboard_join) = clipboard::spawn(poll_ms)?;
-    let (transport, _transport_join) = transport::spawn(config);
+    let (transport, _transport_join) = transport::spawn_with_status(config, status_tx);
     run_supervisor(clipboard, transport).await;
     Ok(())
 }
