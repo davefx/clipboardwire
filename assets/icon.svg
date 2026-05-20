@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <!-- Bus-1: clipboard hanging off a horizontal wire bus.
+       Two peer dots on the bus communicate "you're one of many."
+       Reading priority: clipboard > bus line > peer dots > drop wire. -->
+  <defs>
+    <style>
+      .blue   { fill: #1f5fb8; }
+      .body   { fill: #f7faff; stroke: #1f5fb8; stroke-width: 3.2; stroke-linejoin: round; }
+      .line   { stroke: #1f5fb8; stroke-width: 2.4; stroke-linecap: round; }
+      .bus    { stroke: #1f5fb8; stroke-width: 4.0; stroke-linecap: round; }
+      .drop   { stroke: #1f5fb8; stroke-width: 3.2; stroke-linecap: round; }
+    </style>
+  </defs>
+
+  <!-- Clipboard body -->
+  <rect class="body" x="13" y="5" width="38" height="34" rx="4"/>
+
+  <!-- Clip at top -->
+  <rect class="blue" x="25" y="1" width="14" height="7" rx="2"/>
+
+  <!-- Inner content lines -->
+  <line class="line" x1="19" y1="16" x2="45" y2="16"/>
+  <line class="line" x1="19" y1="22" x2="42" y2="22"/>
+  <line class="line" x1="19" y1="28" x2="38" y2="28"/>
+
+  <!-- Drop wire from clipboard bottom to the bus -->
+  <line class="drop" x1="32" y1="39" x2="32" y2="52"/>
+
+  <!-- The bus line itself -->
+  <line class="bus" x1="6" y1="56" x2="58" y2="56"/>
+
+  <!-- Two peer nodes on the bus, one each side -->
+  <circle class="blue" cx="14" cy="56" r="3.5"/>
+  <circle class="blue" cx="50" cy="56" r="3.5"/>
+
+  <!-- Solder/junction dot where our clipboard joins the bus -->
+  <circle class="blue" cx="32" cy="56" r="3.5"/>
+</svg>

@@ -93,7 +93,9 @@
               Description='Sync clipboards between trusted devices'
               Target='[APPLICATIONFOLDER]clipboardwire.exe'
               Arguments='connect --tray'
-              WorkingDirectory='APPLICATIONFOLDER'/>
+              WorkingDirectory='APPLICATIONFOLDER'
+              Icon='ProductIcon.ico'
+              IconIndex='0'/>
             <RemoveFolder Id='RemoveAppShortcutFolder' On='uninstall'/>
             <RegistryValue
               Root='HKCU'
@@ -117,7 +119,9 @@
             Description='Sync clipboards between trusted devices'
             Target='[APPLICATIONFOLDER]clipboardwire.exe'
             Arguments='connect --tray'
-            WorkingDirectory='APPLICATIONFOLDER'/>
+            WorkingDirectory='APPLICATIONFOLDER'
+            Icon='ProductIcon.ico'
+            IconIndex='0'/>
           <RegistryValue
             Root='HKCU'
             Key='Software\clipboardwire'
@@ -185,6 +189,14 @@
 
     <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
     <Property Id='ARPHELPLINK' Value='https://github.com/davefx/clipboardwire'/>
+
+    <!-- Multi-size ICO used in three places:
+         - Add/Remove Programs (via ARPPRODUCTICON below),
+         - Start Menu and Desktop shortcuts (Icon attribute on Shortcut),
+         - the installer's own title-bar icon. -->
+    <Icon Id='ProductIcon.ico'
+          SourceFile='$(var.CargoTargetBinDir)\..\..\assets\icon.ico'/>
+    <Property Id='ARPPRODUCTICON' Value='ProductIcon.ico'/>
 
     <UI>
       <UIRef Id='WixUI_Minimal'/>

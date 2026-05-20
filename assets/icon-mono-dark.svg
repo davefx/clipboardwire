@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <!-- Monochrome "dark" variant: near-black ink on transparent.
+       Used on light system trays. Same composition as icon.svg
+       (clipboard hanging off a wire bus with two peer nodes).
+       Inkscape doesn't reliably resolve `var(--…)` from a `:root`
+       rule inside an SVG `<style>`, so colours are hard-coded. -->
+  <!-- Clipboard body (outline only) -->
+  <rect x="13" y="5" width="38" height="34" rx="4"
+        fill="none" stroke="#1a1a1a" stroke-width="3.2" stroke-linejoin="round"/>
+
+  <!-- Clip at top (filled) -->
+  <rect x="25" y="1" width="14" height="7" rx="2" fill="#1a1a1a"/>
+
+  <!-- Inner content lines -->
+  <line x1="19" y1="16" x2="45" y2="16" stroke="#1a1a1a" stroke-width="2.4" stroke-linecap="round"/>
+  <line x1="19" y1="22" x2="42" y2="22" stroke="#1a1a1a" stroke-width="2.4" stroke-linecap="round"/>
+  <line x1="19" y1="28" x2="38" y2="28" stroke="#1a1a1a" stroke-width="2.4" stroke-linecap="round"/>
+
+  <!-- Drop wire from clipboard to bus -->
+  <line x1="32" y1="39" x2="32" y2="52" stroke="#1a1a1a" stroke-width="3.2" stroke-linecap="round"/>
+
+  <!-- The bus line -->
+  <line x1="6" y1="56" x2="58" y2="56" stroke="#1a1a1a" stroke-width="4.0" stroke-linecap="round"/>
+
+  <!-- Three nodes on the bus: peer / us / peer -->
+  <circle cx="14" cy="56" r="3.5" fill="#1a1a1a"/>
+  <circle cx="32" cy="56" r="3.5" fill="#1a1a1a"/>
+  <circle cx="50" cy="56" r="3.5" fill="#1a1a1a"/>
+</svg>

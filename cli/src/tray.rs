@@ -81,8 +81,15 @@ pub fn run(
         ),
     };
 
+    // dark_light::detect() reaches DBus on Linux (via zbus) which needs
+    // a Tokio reactor in scope; do the detection inside the runtime
+    // before tao's event loop takes over the main thread.
+    let theme = {
+        let _guard = runtime.enter();
+        dark_light::detect().ok()
+    };
     let tray = TrayIconBuilder::new()
-        .with_icon(build_icon())
+        .with_icon(build_icon(theme))
         .with_menu(Box::new(menu))
         .with_tooltip(initial_tooltip)
         .build()?;
@@ -233,25 +240,34 @@ fn launch_settings_dialog(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 32×32 RGBA placeholder icon: a solid blue square with a small white
-/// square inside, drawn programmatically so we don't ship an image asset.
-fn build_icon() -> tray_icon::Icon {
-    const SIZE: usize = 32;
-    let mut rgba = vec![0u8; SIZE * SIZE * 4];
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let i = (y * SIZE + x) * 4;
-            let inside = (8..24).contains(&x) && (8..24).contains(&y);
-            let (r, g, b) = if inside {
-                (255, 255, 255)
-            } else {
-                (32, 96, 192)
-            };
-            rgba[i] = r;
-            rgba[i + 1] = g;
-            rgba[i + 2] = b;
-            rgba[i + 3] = 255;
-        }
-    }
-    tray_icon::Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).expect("static icon")
+/// Load the bundled tray icon, choosing a colour-/monochrome variant
+/// based on the user's current system theme. Detection happens once at
+/// startup (see `tray::run`); a system theme change while the tray is
+/// running requires a re-launch (auto-reload-on-theme-change is a v0.4
+/// polish item).
+fn build_icon(theme: Option<dark_light::Mode>) -> tray_icon::Icon {
+    // Three pre-rendered 32-px PNGs of `assets/icon{,-mono-dark,-mono-light}.svg`.
+    // - color: blue ink, white clipboard fill; works on both themes but
+    //   doesn't match either system tray aesthetic perfectly.
+    // - mono-dark: near-black ink on transparent — for light system trays.
+    // - mono-light: near-white ink on transparent — for dark system trays.
+    const ICON_COLOR: &[u8] = include_bytes!("../../assets/icon-32.png");
+    const ICON_MONO_DARK: &[u8] = include_bytes!("../../assets/icon-mono-dark-32.png");
+    const ICON_MONO_LIGHT: &[u8] = include_bytes!("../../assets/icon-mono-light-32.png");
+
+    let bytes = match theme {
+        // System wants light UI → tray background is light → use dark ink
+        Some(dark_light::Mode::Light) => ICON_MONO_DARK,
+        // System wants dark UI → tray background is dark → use light ink
+        Some(dark_light::Mode::Dark) => ICON_MONO_LIGHT,
+        // Detection failed or the platform returned Unspecified — fall
+        // back to the colour variant, which is visible on either bg.
+        _ => ICON_COLOR,
+    };
+
+    let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+        .expect("embedded tray icon PNG decodes");
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    tray_icon::Icon::from_rgba(rgba.into_raw(), width, height).expect("tray-icon accepts RGBA")
 }
