@@ -37,9 +37,19 @@ jobs:
       - name: Install Linux tray build + runtime deps (incl. xvfb + dbus for GUI tests)
         if: matrix.os == 'ubuntu-latest'
         run: |
+          sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-dev libayatana-appindicator3-dev libxdo-dev \
-            xvfb dbus
+            xvfb dbus \
+            libxkbcommon-x11-0 libxkbcommon0 \
+            libfontconfig1 \
+            libgl1 libgles2 libegl1 \
+            libxcb-render0 libxcb-shape0 libxcb-xfixes0 \
+            libwayland-client0 libwayland-egl1 libwayland-cursor0 \
+            mesa-utils libglx-mesa0
+          # llvmpipe gives a software GL renderer under xvfb so eframe's
+          # `glow` backend can init without a real GPU.
+          glxinfo -B || true
       - run: cargo test --workspace
       - name: GUI smoke (tray init) — Linux under xvfb
         if: matrix.os == 'ubuntu-latest'

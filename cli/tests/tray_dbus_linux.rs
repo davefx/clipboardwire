@@ -33,7 +33,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Notify;
@@ -222,6 +222,34 @@ async fn tray_menu_is_published_and_quit_terminates_process() {
         .spawn()
         .expect("spawn clipboardwire");
 
+    // Drain the binary's stderr into a buffer so it can be dumped on
+    // assertion failure (otherwise diagnostics for "settings subprocess
+    // never spawned" or eframe init crashes are lost). The settings
+    // subprocess inherits stderr from its parent by default, so any
+    // eframe panic from the child also lands in this buffer.
+    let stderr_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    if let Some(mut stderr) = binary.stderr.take() {
+        let buf = stderr_buf.clone();
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 4096];
+            loop {
+                match stderr.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => buf.lock().unwrap().extend_from_slice(&chunk[..n]),
+                }
+            }
+        });
+    }
+    let dump_stderr = || {
+        let buf = stderr_buf.lock().unwrap();
+        let s = String::from_utf8_lossy(&buf);
+        if s.trim().is_empty() {
+            "[binary stderr: empty]".to_string()
+        } else {
+            format!("--- binary stderr ---\n{s}--- end ---")
+        }
+    };
+
     // Wait for the binary's appindicator to call
     // RegisterStatusNotifierItem on our Watcher. 15 s gives generous
     // room for cold-start link + GTK + eframe init under xvfb.
@@ -248,8 +276,9 @@ async fn tray_menu_is_published_and_quit_terminates_process() {
     {
         Ok(it) => it,
         Err(_) => {
+            let stderr = dump_stderr();
             cleanup_binary(&mut binary, &tmp).await;
-            panic!("clipboardwire did not register an SNI within 8s");
+            panic!("clipboardwire did not register an SNI within 15s.\n{stderr}");
         }
     };
 
@@ -326,11 +355,27 @@ async fn tray_menu_is_published_and_quit_terminates_process() {
     );
     // The Edit-config flow on Linux: tray spawns `clipboardwire settings`
     // as a subprocess. Confirm at least one such process is alive.
-    let settings_pids = pgrep_settings(binary.id());
-    assert!(
-        !settings_pids.is_empty(),
-        "no `clipboardwire settings` subprocess was spawned by the tray"
-    );
+    // Retry briefly: spawn() returns before the child has actually
+    // exec'd, and on a slow CI runner the parent's "settings dialog
+    // launched" log line can land before the child shows up in /proc.
+    let mut settings_pids = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        settings_pids = pgrep_settings(binary.id());
+        if !settings_pids.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    if settings_pids.is_empty() {
+        let stderr = dump_stderr();
+        cleanup_binary(&mut binary, &tmp).await;
+        panic!(
+            "no `clipboardwire settings` subprocess was spawned by the tray (or it died \
+             before we could see it). This usually means eframe failed to init — check \
+             for missing GL / xkbcommon / fontconfig libs.\n{stderr}"
+        );
+    }
     // Tidy up the dialog before the next step — leaving a window open
     // doesn't break the test but is polite.
     for pid in &settings_pids {
@@ -365,8 +410,9 @@ async fn tray_menu_is_published_and_quit_terminates_process() {
     .unwrap_or(false);
 
     if !exited_cleanly {
+        let stderr = dump_stderr();
         cleanup_binary(&mut binary, &tmp).await;
-        panic!("clipboardwire did not exit after Quit menu item activation");
+        panic!("clipboardwire did not exit after Quit menu item activation.\n{stderr}");
     }
 
     let _ = std::fs::remove_dir_all(&tmp);

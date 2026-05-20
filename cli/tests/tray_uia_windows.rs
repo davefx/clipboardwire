@@ -127,9 +127,7 @@ fn tray_icon_is_registered_and_discoverable() {
             SEARCH_DEADLINE.as_secs(),
         );
     }
-    eprintln!(
-        "found matching AutomationElement(s) (tried overflow: {tried_overflow}): {hits:?}"
-    );
+    eprintln!("found matching AutomationElement(s) (tried overflow: {tried_overflow}): {hits:?}");
 }
 
 /// Find the "Show Hidden Icons" element (or its Win 10 equivalent) and
@@ -145,7 +143,9 @@ fn try_invoke_overflow(automation: &UIAutomation) -> bool {
             return;
         }
         let name = elem.get_name().unwrap_or_default();
-        if OVERFLOW_BUTTON_NAMES.iter().any(|n| name.eq_ignore_ascii_case(n))
+        if OVERFLOW_BUTTON_NAMES
+            .iter()
+            .any(|n| name.eq_ignore_ascii_case(n))
             || name.to_lowercase().contains("hidden icons")
         {
             target = Some(elem.clone());
