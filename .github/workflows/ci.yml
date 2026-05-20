@@ -53,3 +53,6 @@ jobs:
       - name: GUI smoke (tray init) — Windows
         if: matrix.os == 'windows-latest'
         run: cargo test --workspace -- --ignored connect_tray
+      - name: GUI interaction (UIA tray discovery) — Windows
+        if: matrix.os == 'windows-latest'
+        run: cargo test --workspace --test tray_uia_windows -- --ignored --nocapture

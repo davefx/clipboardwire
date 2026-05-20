@@ -29,6 +29,12 @@ serde = { workspace = true }
 zbus = { version = "5", features = ["tokio"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
+[target.'cfg(windows)'.dev-dependencies]
+# UI Automation client for the cross-platform tray-interaction harness.
+# Runs under wine + xvfb when the test is invoked through the Cargo
+# runner in `.cargo/config.toml`.
+uiautomation = "0.16"
+
 # -- Native packaging metadata --
 # Build .deb:  cargo install cargo-deb && cargo deb -p clipboardwire
 # Build .rpm:  cargo install cargo-generate-rpm && cargo generate-rpm -p clipboardwire

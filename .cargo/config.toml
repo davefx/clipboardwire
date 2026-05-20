@@ -1,0 +1,7 @@
+[target.x86_64-pc-windows-gnu]
+# `cargo test --target x86_64-pc-windows-gnu` invokes built binaries
+# through this script. The wrapper runs them under wine + xvfb so we
+# can drive the Windows tray UI from a Linux dev box (and from the
+# Linux CI runner — bypassing the need for a separate windows-latest
+# job to cover interaction).
+runner = "tools/wine-test-runner.sh"
