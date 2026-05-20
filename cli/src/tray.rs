@@ -1,39 +1,66 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! System-tray UI wrapper around the headless client supervisor.
+//! System-tray UI wired into a native OS event loop.
+//!
+//! `tray-icon` requires the thread that creates the tray icon to run an OS
+//! message pump (Win32 / GTK / NSRunLoop). v0.2.0/v0.2.1 created the tray
+//! from a tokio task, which on Windows meant right-click never showed the
+//! menu — the icon was visible but the OS had no thread to dispatch
+//! events to. v0.2.2 fixes that by giving the main thread to `tao`'s
+//! event loop and running the tokio runtime on its worker threads.
 //!
 //! The tray comes up **before** the config is parsed, so a fresh install
-//! that hasn't been configured yet still gets a visible icon (with a
-//! "needs config" tooltip) rather than failing silently. The menu offers:
+//! still gets a visible icon (with a "needs config" tooltip) rather than
+//! failing silently. The menu offers:
 //!
-//! - **Edit config…** — opens the config file in the platform's default
-//!   text editor (notepad / xdg-open / open). If the file doesn't exist
-//!   yet, a placeholder is written first.
+//! - **Edit config…** — writes a template at the default path if absent,
+//!   then opens the file in the platform's default text editor.
 //! - **Reload config** — stops any running supervisor and re-parses the
 //!   config from disk. Use this after editing.
 //! - **Quit clipboardwire** — orderly shutdown.
-//!
-//! Linux uses the libayatana-appindicator backend; the binary therefore
-//! requires libgtk-3 + libayatana-appindicator3 at runtime even for
-//! headless `serve` use. A `tray` cargo feature so distro maintainers can
-//! ship a server-only variant is on the v0.3 backlog.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use anyhow::Result;
 use clipboardwire_core::client::ClientConfig;
+use tao::event::Event;
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
+use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use tray_icon::TrayIconBuilder;
 
-/// Run the tray UI with deferred config loading.
-///
-/// `initial_config` is `Some` if the binary managed to parse a config
-/// before entering tray mode; `None` otherwise (first run, or a parse
-/// error logged elsewhere). The tray always comes up either way.
-pub async fn run(config_path: PathBuf, initial_config: Option<ClientConfig>) -> Result<()> {
+/// Events delivered to the tao event loop from background sources.
+#[derive(Debug)]
+enum UserEvent {
+    /// A menu item was clicked.
+    Menu(MenuEvent),
+    /// The client supervisor task finished on its own (not via abort).
+    /// Carries the generation id so we can ignore stale completions of
+    /// supervisors that were already replaced.
+    SupervisorExited { generation: u64, summary: String },
+}
+
+/// Enter the tray UI, taking the main thread for the OS event loop.
+/// The runtime is moved into the loop so spawned tasks keep running for
+/// its lifetime. `initial_config` is `Some` when we successfully parsed
+/// a config before entering tray mode. `host_hub_handle` is `Some` only
+/// in `host` mode — keeps the embedded server alive.
+pub fn run(
+    runtime: Runtime,
+    config_path: PathBuf,
+    initial_config: Option<ClientConfig>,
+    host_hub_handle: Option<JoinHandle<Result<()>>>,
+) -> Result<()> {
+    // CRITICAL: build the event loop FIRST. On Linux, tao's
+    // EventLoopBuilder::build() runs gtk::init() — calling any
+    // tray-icon constructor before that point panics with
+    // "GTK has not been initialized". The Tier-1 smoke test caught
+    // this regression once already; please don't reorder.
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
+
     let menu = Menu::new();
     let edit_item = MenuItem::new("Edit config…", true, None);
     let reload_item = MenuItem::new("Reload config", true, None);
@@ -42,11 +69,14 @@ pub async fn run(config_path: PathBuf, initial_config: Option<ClientConfig>) -> 
     menu.append(&reload_item)?;
     menu.append(&quit_item)?;
 
+    let edit_id = edit_item.id().clone();
+    let reload_id = reload_item.id().clone();
+    let quit_id = quit_item.id().clone();
+
     let initial_tooltip = match &initial_config {
         Some(cfg) => format!("clipboardwire — {}", cfg.server),
         None => format!(
-            "clipboardwire — needs config (right-click → Edit config). \
-             File: {}",
+            "clipboardwire — needs config (right-click → Edit config)\n{}",
             config_path.display()
         ),
     };
@@ -59,107 +89,135 @@ pub async fn run(config_path: PathBuf, initial_config: Option<ClientConfig>) -> 
 
     info!(path = %config_path.display(), "tray icon shown");
 
-    let mut supervisor: Option<JoinHandle<Result<()>>> =
-        initial_config.map(|cfg| tokio::spawn(clipboardwire_core::client::run(cfg)));
+    // Pipe menu events into the tao event loop. This is the integration
+    // point that tray-icon's docs recommend: their menu_channel fires on
+    // the OS-event thread; we forward each event as a UserEvent so the
+    // main loop wakes up to handle it.
+    let menu_proxy = proxy.clone();
+    MenuEvent::set_event_handler(Some(move |event| {
+        let _ = menu_proxy.send_event(UserEvent::Menu(event));
+    }));
 
-    let menu_rx = MenuEvent::receiver();
-    let edit_id = edit_item.id().clone();
-    let reload_id = reload_item.id().clone();
-    let quit_id = quit_item.id().clone();
+    let mut supervisor: Option<JoinHandle<Result<()>>> = None;
+    let mut supervisor_gen: u64 = 0;
 
-    let mut menu_poll = tokio::time::interval(Duration::from_millis(100));
-    menu_poll.tick().await;
+    if let Some(cfg) = initial_config {
+        supervisor_gen += 1;
+        supervisor = Some(spawn_supervisor(
+            runtime.handle(),
+            cfg,
+            supervisor_gen,
+            proxy.clone(),
+        ));
+    }
 
-    loop {
-        tokio::select! {
-            biased;
+    // Keep the host-mode hub task alive for the lifetime of the loop.
+    let _hub_handle = host_hub_handle;
 
-            // Watch the supervisor when one is running. If it exits on its
-            // own (e.g. unrecoverable transport error), drop it but keep
-            // the tray alive so the user can fix the config and reload.
-            _ = poll_supervisor(&mut supervisor) => {
-                update_tooltip(&tray, &config_path, supervisor.is_some(), Some("supervisor exited; right-click → Edit config"));
-            }
+    event_loop.run(move |event, _, control_flow| {
+        // The supervisor signals completion via UserEvent, so we don't
+        // need to poll; idle on Wait until the OS or a UserEvent wakes us.
+        *control_flow = ControlFlow::Wait;
 
-            _ = tokio::signal::ctrl_c() => {
-                info!("ctrl-c received; shutting down");
-                abort_supervisor(&mut supervisor);
-                return Ok(());
-            }
-
-            _ = menu_poll.tick() => {
-                while let Ok(event) = menu_rx.try_recv() {
-                    if event.id == quit_id {
-                        info!("Quit menu item clicked");
-                        abort_supervisor(&mut supervisor);
-                        return Ok(());
-                    } else if event.id == edit_id {
-                        if let Err(e) = ensure_template_exists(&config_path) {
-                            warn!(error = %format!("{e:#}"), "could not write template config");
-                        }
-                        if let Err(e) = open_in_editor(&config_path) {
-                            warn!(error = %format!("{e:#}"), "could not open config in editor");
-                        }
-                    } else if event.id == reload_id {
-                        abort_supervisor(&mut supervisor);
-                        match ClientConfig::load(&config_path) {
-                            Ok(cfg) => {
-                                info!("config reloaded; starting supervisor");
-                                let new = tokio::spawn(clipboardwire_core::client::run(cfg.clone()));
-                                supervisor = Some(new);
-                                let _ = tray.set_tooltip(Some(format!(
-                                    "clipboardwire — {}",
-                                    cfg.server
-                                )));
-                            }
-                            Err(e) => {
-                                warn!(error = %format!("{e:#}"), "config still invalid after reload");
-                                update_tooltip(&tray, &config_path, false, Some("config invalid; check it"));
-                            }
-                        }
-                    } else {
-                        warn!(id = ?event.id, "ignoring unknown menu event");
+        match event {
+            Event::UserEvent(UserEvent::Menu(menu_event)) => {
+                if menu_event.id == quit_id {
+                    info!("Quit menu item clicked");
+                    if let Some(s) = supervisor.take() {
+                        s.abort();
                     }
+                    *control_flow = ControlFlow::Exit;
+                } else if menu_event.id == edit_id {
+                    if let Err(e) = ensure_template_exists(&config_path) {
+                        warn!(error = %format!("{e:#}"), "could not write template config");
+                    }
+                    if let Err(e) = open_in_editor(&config_path) {
+                        warn!(error = %format!("{e:#}"), "could not open config in editor");
+                    }
+                } else if menu_event.id == reload_id {
+                    if let Some(s) = supervisor.take() {
+                        s.abort();
+                    }
+                    match ClientConfig::load(&config_path) {
+                        Ok(cfg) => {
+                            supervisor_gen += 1;
+                            let new = spawn_supervisor(
+                                runtime.handle(),
+                                cfg.clone(),
+                                supervisor_gen,
+                                proxy.clone(),
+                            );
+                            supervisor = Some(new);
+                            let _ =
+                                tray.set_tooltip(Some(format!("clipboardwire — {}", cfg.server)));
+                            info!("config reloaded; supervisor restarted");
+                        }
+                        Err(e) => {
+                            warn!(error = %format!("{e:#}"), "config invalid; left disconnected");
+                            let _ = tray.set_tooltip(Some(format!(
+                                "clipboardwire — config invalid (right-click → Edit config)\n{}",
+                                config_path.display()
+                            )));
+                        }
+                    }
+                } else {
+                    warn!(id = ?menu_event.id, "ignoring unknown menu event");
                 }
             }
-        }
-    }
-}
-
-/// Update the tray tooltip with a status hint.
-fn update_tooltip(tray: &TrayIcon, config_path: &Path, _connected: bool, status: Option<&str>) {
-    let text = match status {
-        Some(s) => format!("clipboardwire — {} (file: {})", s, config_path.display()),
-        None => format!("clipboardwire — file: {}", config_path.display()),
-    };
-    let _ = tray.set_tooltip(Some(text));
-}
-
-/// Future that resolves only when there is a running supervisor and it
-/// finishes. When `supervisor` is `None`, returns pending forever so the
-/// caller's `select!` ignores this branch.
-async fn poll_supervisor(supervisor: &mut Option<JoinHandle<Result<()>>>) {
-    match supervisor {
-        Some(handle) => {
-            let result = handle.await;
-            match result {
-                Ok(Ok(())) => info!("client supervisor exited cleanly"),
-                Ok(Err(e)) => {
-                    warn!(error = %format!("{e:#}"), "client supervisor exited with error")
-                }
-                Err(e) if e.is_cancelled() => info!("client supervisor cancelled"),
-                Err(e) => warn!(error = %e, "client supervisor task panicked"),
+            Event::UserEvent(UserEvent::SupervisorExited {
+                generation,
+                summary,
+            }) if Some(generation) == current_generation(&supervisor, supervisor_gen) => {
+                supervisor = None;
+                warn!(
+                    gen = generation,
+                    summary, "supervisor exited on its own; staying in tray"
+                );
+                let _ = tray.set_tooltip(Some(format!(
+                    "clipboardwire — disconnected ({}). Right-click → Reload config",
+                    summary
+                )));
             }
-            *supervisor = None;
+            _ => {}
         }
-        None => std::future::pending::<()>().await,
+    })
+}
+
+/// The "current generation" is `supervisor_gen` iff a supervisor is in
+/// flight. Used to filter stale UserEvent::SupervisorExited deliveries
+/// from supervisors that were aborted before completing their await.
+fn current_generation(
+    supervisor: &Option<JoinHandle<Result<()>>>,
+    supervisor_gen: u64,
+) -> Option<u64> {
+    if supervisor.is_some() {
+        Some(supervisor_gen)
+    } else {
+        None
     }
 }
 
-fn abort_supervisor(supervisor: &mut Option<JoinHandle<Result<()>>>) {
-    if let Some(handle) = supervisor.take() {
-        handle.abort();
-    }
+/// Spawn the client supervisor and arrange for a UserEvent on natural
+/// completion. Abortion via `.abort()` cancels the future and skips the
+/// post-await event-send, so generation tracking handles the rest.
+fn spawn_supervisor(
+    handle: &tokio::runtime::Handle,
+    cfg: ClientConfig,
+    generation: u64,
+    proxy: tao::event_loop::EventLoopProxy<UserEvent>,
+) -> JoinHandle<Result<()>> {
+    handle.spawn(async move {
+        let result = clipboardwire_core::client::run(cfg).await;
+        let summary = match &result {
+            Ok(()) => "clean exit".to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+        let _ = proxy.send_event(UserEvent::SupervisorExited {
+            generation,
+            summary,
+        });
+        result
+    })
 }
 
 /// If `path` doesn't exist, write the placeholder template + chmod 0600.
@@ -186,7 +244,7 @@ fn open_in_editor(path: &Path) -> Result<()> {
 
 /// 32×32 RGBA placeholder icon: a solid blue square with a small white
 /// square inside, drawn programmatically so we don't ship an image asset.
-fn build_icon() -> Icon {
+fn build_icon() -> tray_icon::Icon {
     const SIZE: usize = 32;
     let mut rgba = vec![0u8; SIZE * SIZE * 4];
     for y in 0..SIZE {
@@ -204,5 +262,5 @@ fn build_icon() -> Icon {
             rgba[i + 3] = 255;
         }
     }
-    Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).expect("static icon")
+    tray_icon::Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).expect("static icon")
 }

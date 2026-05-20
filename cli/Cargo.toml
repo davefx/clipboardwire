@@ -20,6 +20,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 tray-icon = "0.22"
+tao = "0.34"
 
 # -- Native packaging metadata --
 # Build .deb:  cargo install cargo-deb && cargo deb -p clipboardwire

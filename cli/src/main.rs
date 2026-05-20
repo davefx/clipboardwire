@@ -1,5 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// On Windows release builds, use the "windows" subsystem so launching the
+// binary from a Start Menu shortcut, the Desktop icon, or the autostart
+// HKCU\…\Run entry doesn't pop a console window. The
+// `attach_parent_console` shim re-attaches us to the calling terminal
+// when the user ran us from cmd / PowerShell, so logs still appear
+// inline there.
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 mod tray;
 
 use std::path::PathBuf;
@@ -19,14 +30,12 @@ struct Cli {
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
-    /// Show a system-tray icon while running. Windows-only in v0.1;
-    /// on other platforms this falls back to the headless mode with a
-    /// warning.
+    /// Show a system-tray icon while running.
     #[arg(long, global = true)]
     tray: bool,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 enum Command {
     /// Run as a relay hub only (headless / systemd / NAS).
     Serve,
@@ -36,18 +45,54 @@ enum Command {
     Connect,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    #[cfg(target_os = "windows")]
+    attach_parent_console();
+
+    init_tracing();
+    let cli = Cli::parse();
+    let cmd = cli.command.clone().unwrap_or(Command::Connect);
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("building tokio runtime")?;
+
+    // Tray mode owns the main thread for the native OS event loop (tao).
+    // Everything else runs as an async future via `block_on`.
+    let needs_tray = cli.tray && matches!(cmd, Command::Connect | Command::Host);
+    if needs_tray {
+        run_with_tray(runtime, cli, cmd)
+    } else {
+        runtime.block_on(run_headless(cli, cmd))
+    }
+}
+
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "clipboardwire=info,clipboardwire_core=info".into()),
         )
         .init();
+}
 
-    let cli = Cli::parse();
-    let cmd = cli.command.unwrap_or(Command::Connect);
+/// Best-effort: re-attach to the parent console so `cargo run`, PowerShell,
+/// and cmd.exe still surface our stderr logs even with the "windows"
+/// subsystem. If there's no parent console (e.g. launched from Start Menu
+/// or autostart), this is a no-op and we stay silent.
+#[cfg(target_os = "windows")]
+fn attach_parent_console() {
+    unsafe extern "system" {
+        fn AttachConsole(pid: u32) -> i32;
+    }
+    const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
 
+async fn run_headless(cli: Cli, cmd: Command) -> Result<()> {
     match cmd {
         Command::Serve => {
             if cli.tray {
@@ -57,14 +102,10 @@ async fn main() -> Result<()> {
             clipboardwire_core::server::run(cfg).await
         }
         Command::Connect => {
-            if cli.tray {
-                run_connect_tray(cli.config.as_deref()).await
-            } else {
-                let cfg = load_client_config_or_bail(cli.config.as_deref())?;
-                run_client_headless(cfg).await
-            }
+            let cfg = load_client_config_or_bail(cli.config.as_deref())?;
+            run_client_headless(cfg).await
         }
-        Command::Host => run_host(cli.config.as_deref(), cli.tray).await,
+        Command::Host => run_host_headless(cli.config.as_deref()).await,
     }
 }
 
@@ -76,47 +117,6 @@ async fn run_client_headless(cfg: ClientConfig) -> Result<()> {
             Ok(())
         }
     }
-}
-
-/// Tray mode for `connect`: the tray icon must come up even if the config
-/// is missing or invalid, so the user has a discoverable way to fix it.
-/// Compute the path, write a placeholder if nothing's there yet, then hand
-/// off to the tray with the optional parsed config.
-async fn run_connect_tray(override_path: Option<&std::path::Path>) -> Result<()> {
-    let path = match override_path {
-        Some(p) => p.to_path_buf(),
-        None => ClientConfig::default_path()
-            .context("could not determine the default client config path")?,
-    };
-
-    if override_path.is_none() && !path.exists() {
-        if let Err(e) = ClientConfig::write_template(&path) {
-            tracing::warn!(
-                error = %format!("{e:#}"),
-                "could not write template config at {}",
-                path.display()
-            );
-        } else {
-            tracing::info!(
-                "no client config found; wrote a placeholder at {} — use the \
-                 tray menu's \"Edit config\" item to set the server URL and password",
-                path.display()
-            );
-        }
-    }
-
-    let cfg = match ClientConfig::load(&path) {
-        Ok(c) => Some(c),
-        Err(e) => {
-            tracing::warn!(
-                error = %format!("{e:#}"),
-                "no usable client config yet; tray will come up in needs-config state"
-            );
-            None
-        }
-    };
-
-    tray::run(path, cfg).await
 }
 
 /// Headless config loader: hard-errors if the file is missing. When the
@@ -151,19 +151,32 @@ fn load_client_config_or_bail(override_path: Option<&std::path::Path>) -> Result
         .with_context(|| format!("loading client config at {}", path.display()))
 }
 
-/// `host` mode: bind the server first (so the client connects to a real
-/// listener), then spawn both the server and a client pointed at loopback.
-///
-/// If a client config file is supplied via `--config`, the user/password and
-/// poll_ms come from there; the `server` URL field is ignored and we use
-/// `ws://127.0.0.1:<bound_port>/sync` instead. With no `--config`, we derive
-/// the client credentials from the same env vars the server reads.
-async fn run_host(client_config_path: Option<&std::path::Path>, tray: bool) -> Result<()> {
+/// `host` mode without tray. The tray-mode variant is below in
+/// `run_with_tray` because it has to share the runtime with the event loop.
+async fn run_host_headless(client_config_path: Option<&std::path::Path>) -> Result<()> {
     let server_cfg = ServerConfig::from_env()?;
     let (listener, addr) = clipboardwire_core::server::bind(&server_cfg).await?;
     tracing::info!(addr = %addr, "hub listening (host mode)");
 
-    let port = addr.port();
+    let client_cfg = build_host_client_config(&server_cfg, addr.port(), client_config_path)?;
+
+    let server_task = tokio::spawn(async move {
+        clipboardwire_core::server::serve(listener, server_cfg, std::future::pending()).await
+    });
+
+    tokio::select! {
+        res = server_task => { res.context("server task panicked")??; }
+        res = run_client_headless(client_cfg) => { res?; }
+        _ = tokio::signal::ctrl_c() => { tracing::info!("shutting down"); }
+    }
+    Ok(())
+}
+
+fn build_host_client_config(
+    server_cfg: &ServerConfig,
+    port: u16,
+    override_path: Option<&std::path::Path>,
+) -> Result<ClientConfig> {
     let scheme = if server_cfg.tls_enabled() {
         "wss"
     } else {
@@ -171,7 +184,7 @@ async fn run_host(client_config_path: Option<&std::path::Path>, tray: bool) -> R
     };
     let loopback_url = format!("{scheme}://127.0.0.1:{port}/sync");
 
-    let (user, password, poll_ms) = match client_config_path {
+    let (user, password, poll_ms) = match override_path {
         Some(p) => {
             let cfg = ClientConfig::load(p).with_context(|| format!("loading {}", p.display()))?;
             (cfg.user, cfg.password, cfg.poll_ms)
@@ -179,47 +192,95 @@ async fn run_host(client_config_path: Option<&std::path::Path>, tray: bool) -> R
         None => (server_cfg.user.clone(), server_cfg.password.clone(), 300),
     };
 
-    let client_cfg = ClientConfig {
+    Ok(ClientConfig {
         server: loopback_url,
         user,
         password,
         poll_ms,
-        // `host` connects to its own embedded server on loopback. If that
-        // server is configured for TLS, the cert is most likely self-signed
-        // and SAN'd for the public hostname rather than 127.0.0.1, so skip
-        // verification on the loopback hop. The blast radius is bounded to
-        // this in-process client.
         tls_ca_file: None,
+        // Loopback in host mode often pairs with a public-cert TLS hub;
+        // the cert's SAN won't cover 127.0.0.1. Skip cert verification on
+        // this in-process hop only.
         tls_insecure: server_cfg.tls_enabled(),
+    })
+}
+
+/// Tray mode: the main thread is given to tao's event loop so the OS
+/// dispatches right-click, menu activation, etc. The tokio runtime stays
+/// alive on its worker threads for the duration of the loop.
+fn run_with_tray(runtime: tokio::runtime::Runtime, cli: Cli, cmd: Command) -> Result<()> {
+    let (config_path, initial_cfg, hub_handle) = match cmd {
+        Command::Connect => {
+            let (path, cfg) = prepare_connect_tray_args(cli.config.as_deref())?;
+            (path, cfg, None)
+        }
+        Command::Host => {
+            let (path, cfg, hub) = prepare_host_tray_args(&runtime, cli.config.as_deref())?;
+            (path, Some(cfg), Some(hub))
+        }
+        Command::Serve => unreachable!("serve doesn't use tray mode"),
     };
 
-    let server_task = tokio::spawn(async move {
+    tray::run(runtime, config_path, initial_cfg, hub_handle)
+}
+
+fn prepare_connect_tray_args(
+    override_path: Option<&std::path::Path>,
+) -> Result<(PathBuf, Option<ClientConfig>)> {
+    let path = match override_path {
+        Some(p) => p.to_path_buf(),
+        None => ClientConfig::default_path()
+            .context("could not determine the default client config path")?,
+    };
+
+    if override_path.is_none() && !path.exists() {
+        match ClientConfig::write_template(&path) {
+            Ok(()) => tracing::info!(
+                "no client config found; wrote a placeholder at {} — use the tray menu's \
+                 \"Edit config\" item to set the server URL and password",
+                path.display()
+            ),
+            Err(e) => tracing::warn!(
+                error = %format!("{e:#}"),
+                "could not write template config at {}",
+                path.display()
+            ),
+        }
+    }
+
+    let cfg = match ClientConfig::load(&path) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            tracing::warn!(
+                error = %format!("{e:#}"),
+                "no usable client config yet; tray will come up in needs-config state"
+            );
+            None
+        }
+    };
+
+    Ok((path, cfg))
+}
+
+/// Returns (a stand-in path for the tray's Edit-config menu, client_cfg,
+/// server JoinHandle to keep alive).
+fn prepare_host_tray_args(
+    runtime: &tokio::runtime::Runtime,
+    override_path: Option<&std::path::Path>,
+) -> Result<(PathBuf, ClientConfig, tokio::task::JoinHandle<Result<()>>)> {
+    let server_cfg = ServerConfig::from_env()?;
+    let (listener, addr) = runtime.block_on(clipboardwire_core::server::bind(&server_cfg))?;
+    tracing::info!(addr = %addr, "hub listening (host mode)");
+
+    let client_cfg = build_host_client_config(&server_cfg, addr.port(), override_path)?;
+
+    let path = override_path.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+        ClientConfig::default_path().unwrap_or_else(|_| PathBuf::from("config.toml"))
+    });
+
+    let hub_handle = runtime.spawn(async move {
         clipboardwire_core::server::serve(listener, server_cfg, std::future::pending()).await
     });
 
-    // host mode always has a valid in-memory client config (derived from
-    // the server's env vars + optional override). Hand it to the tray if
-    // requested; otherwise run headless. The tray's "needs config" state
-    // shouldn't normally be reachable here.
-    let client_future = async move {
-        if tray {
-            let path = ClientConfig::default_path().unwrap_or_else(|_| "host-mode".into());
-            tray::run(path, Some(client_cfg)).await
-        } else {
-            run_client_headless(client_cfg).await
-        }
-    };
-
-    tokio::select! {
-        res = server_task => {
-            res.context("server task panicked")??;
-        }
-        res = client_future => {
-            res?;
-        }
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("shutting down");
-        }
-    }
-    Ok(())
+    Ok((path, client_cfg, hub_handle))
 }
