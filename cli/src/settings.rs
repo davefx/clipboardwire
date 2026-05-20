@@ -23,6 +23,8 @@
 //! Exits with code 0 on Save, 1 on Cancel / window close.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clipboardwire_core::client::ClientConfig;
@@ -36,8 +38,9 @@ const WINDOW_TITLE: &str = "clipboardwire — settings";
 /// Blocks the calling thread for the lifetime of the window.
 pub fn run(config_path: PathBuf) -> Result<()> {
     let initial = load_or_default(&config_path);
+    let saved = Arc::new(AtomicBool::new(false));
 
-    let app = SettingsApp::new(config_path, initial);
+    let app = SettingsApp::new(config_path, initial, saved.clone());
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -55,18 +58,15 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     )
     .map_err(|e| anyhow::anyhow!("settings window: {e}"))?;
 
-    // eframe::run_native returns when the window is closed. The exit
-    // code is decided by `SettingsApp::on_exit` via SAVE/CANCEL state
-    // recorded into a static; cleaner to surface via process exit code
-    // so the parent (tray) can react if it wants.
-    if SAVED.load(std::sync::atomic::Ordering::SeqCst) {
+    // eframe::run_native returns when the window is closed. `saved` is
+    // flipped by `try_save`; we surface the success/cancel distinction
+    // to the parent (the tray) via the process exit code.
+    if saved.load(Ordering::SeqCst) {
         Ok(())
     } else {
         anyhow::bail!("settings dialog cancelled")
     }
 }
-
-static SAVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn load_or_default(path: &Path) -> FormState {
     if path.exists() {
@@ -127,10 +127,11 @@ struct SettingsApp {
     config_path: PathBuf,
     form: FormState,
     show_password: bool,
+    saved: Arc<AtomicBool>,
 }
 
 impl SettingsApp {
-    fn new(config_path: PathBuf, mut form: FormState) -> Self {
+    fn new(config_path: PathBuf, mut form: FormState, saved: Arc<AtomicBool>) -> Self {
         if form.poll_ms == 0 {
             form.poll_ms = DEFAULT_POLL_MS;
         }
@@ -138,6 +139,7 @@ impl SettingsApp {
             config_path,
             form,
             show_password: false,
+            saved,
         }
     }
 
@@ -151,7 +153,7 @@ impl SettingsApp {
         match write_toml(&self.config_path, &self.form) {
             Ok(()) => {
                 self.form.last_error = None;
-                SAVED.store(true, std::sync::atomic::Ordering::SeqCst);
+                self.saved.store(true, Ordering::SeqCst);
                 true
             }
             Err(e) => {
@@ -164,6 +166,16 @@ impl SettingsApp {
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.draw(ctx);
+    }
+}
+
+impl SettingsApp {
+    /// Render one frame of the settings UI. Split out from
+    /// `eframe::App::update` so tests can drive it through
+    /// [`egui_kittest::Harness`] without constructing an `eframe::Frame`
+    /// (which has no public constructor).
+    fn draw(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("clipboardwire client settings");
             ui.add_space(8.0);
@@ -275,7 +287,7 @@ impl eframe::App for SettingsApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 if cancel {
-                    SAVED.store(false, std::sync::atomic::Ordering::SeqCst);
+                    self.saved.store(false, Ordering::SeqCst);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
@@ -552,5 +564,114 @@ mod tests {
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // -------------------------------------------------------------
+    // egui_kittest harness tests — drive the actual widget tree to
+    // confirm Save / Cancel / error-label wiring. Without these, the
+    // pure-data tests above could pass even if the buttons weren't
+    // hooked up at all.
+    // -------------------------------------------------------------
+
+    use egui_kittest::kittest::Queryable;
+    use egui_kittest::Harness;
+
+    fn unique_dir(label: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "cw-settings-kt-{label}-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Build a harness around a SettingsApp with the given form +
+    /// config path. The closure-based `new_state` API lets the harness
+    /// own the app and lets test code reach in via `harness.state_mut()`
+    /// between ticks.
+    fn build_harness(
+        path: PathBuf,
+        form: FormState,
+        saved: Arc<AtomicBool>,
+    ) -> Harness<'static, SettingsApp> {
+        let app = SettingsApp::new(path, form, saved);
+        Harness::new_state(|ctx, app: &mut SettingsApp| app.draw(ctx), app)
+    }
+
+    #[test]
+    fn ui_renders_with_expected_widget_labels() {
+        let path = unique_dir("labels").join("config.toml");
+        let saved = Arc::new(AtomicBool::new(false));
+        let mut harness = build_harness(path, valid_form(), saved);
+        harness.run();
+
+        // These four widgets are the contract surface — the form would
+        // be useless without any of them. We don't assert exhaustively
+        // because labels we change for usability shouldn't fail the test.
+        harness.get_by_label("Save");
+        harness.get_by_label("Cancel");
+        harness.get_by_label("Server URL");
+        harness.get_by_label("Username");
+    }
+
+    #[test]
+    fn save_click_writes_toml_and_flips_saved_flag() {
+        let path = unique_dir("save").join("config.toml");
+        let saved = Arc::new(AtomicBool::new(false));
+        let mut harness = build_harness(path.clone(), valid_form(), saved.clone());
+        harness.run();
+        harness.get_by_label("Save").click();
+        // Two extra ticks: the click is consumed on the next frame,
+        // then try_save runs and writes the file.
+        harness.run();
+        harness.run();
+
+        assert!(saved.load(Ordering::SeqCst), "Save did not flip the flag");
+        assert!(path.exists(), "Save did not write the config file");
+
+        // And the file round-trips back through ClientConfig::load.
+        let loaded = ClientConfig::load(&path).expect("written file parses");
+        assert_eq!(loaded.user, "alice");
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn cancel_click_does_not_write_file() {
+        let path = unique_dir("cancel").join("config.toml");
+        let saved = Arc::new(AtomicBool::new(false));
+        let mut harness = build_harness(path.clone(), valid_form(), saved.clone());
+        harness.run();
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        harness.run();
+
+        assert!(!saved.load(Ordering::SeqCst), "Cancel should not flip flag");
+        assert!(!path.exists(), "Cancel should not write the config file");
+    }
+
+    #[test]
+    fn invalid_input_surfaces_an_error_label() {
+        let path = unique_dir("err").join("config.toml");
+        let mut form = valid_form();
+        form.user.clear(); // validation will reject this on Save
+        let saved = Arc::new(AtomicBool::new(false));
+        let mut harness = build_harness(path.clone(), form, saved.clone());
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        harness.run();
+
+        assert!(
+            !saved.load(Ordering::SeqCst),
+            "validation failure should not flip Saved"
+        );
+        assert!(!path.exists(), "validation failure should not write file");
+        // The error message we render for empty user starts with this prefix.
+        harness.get_by_label_contains("Username must not be empty");
     }
 }

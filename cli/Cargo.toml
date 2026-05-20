@@ -27,6 +27,9 @@ serde = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 dark-light = "2"
 
+[dev-dependencies]
+egui_kittest = { version = "0.32", features = ["eframe"] }
+
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 zbus = { version = "5", features = ["tokio"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
