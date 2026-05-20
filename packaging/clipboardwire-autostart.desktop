@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=clipboardwire
+Comment=Sync the clipboard between trusted devices over a LAN/VPN
+Exec=clipboardwire
+Icon=clipboardwire
+Terminal=false
+# Visible in GNOME's Startup Applications / KDE Autostart but starts
+# DISABLED. The user opts in via the desktop's startup-apps GUI, which
+# writes ~/.config/autostart/clipboardwire.desktop with =true. Hidden
+# from the regular apps menu so it doesn't double up with the
+# /usr/share/applications/ entry.
+NoDisplay=true
+X-GNOME-Autostart-enabled=false

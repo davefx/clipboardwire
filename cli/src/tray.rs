@@ -68,6 +68,11 @@ struct State {
     /// The embedded hub spawned from `[hub]` in the client config.
     embedded_hub: Option<JoinHandle<Result<()>>>,
     embedded_hub_gen: u64,
+    /// Set when the most recent hub-bind attempt failed (e.g. another
+    /// process is on the same port). Shown in the tray status line so
+    /// the user doesn't have to read the log to understand why nothing
+    /// works.
+    hub_bind_error: Option<String>,
     /// PID of the currently-running settings subprocess, if any.
     /// We don't keep the `Child` here because the watcher thread owns
     /// it; this is just for "is one running" checks.
@@ -163,6 +168,7 @@ pub fn run(
         client_status: None,
         embedded_hub: None,
         embedded_hub_gen: 0,
+        hub_bind_error: None,
         settings_alive: false,
         cfg: initial_config,
     };
@@ -296,6 +302,7 @@ fn abort_running(state: &mut State) {
         h.abort();
     }
     state.client_status = None;
+    state.hub_bind_error = None;
 }
 
 fn reload_config_into(state: &mut State, config_path: &Path) {
@@ -429,9 +436,17 @@ fn start_embedded_hub_with_cfg(
         server_cfg.state_dir = config_path.parent().map(|p| p.to_path_buf());
     }
 
-    let (listener, addr) = handle
-        .block_on(clipboardwire_core::server::bind(&server_cfg))
-        .with_context(|| format!("binding embedded hub to {}", server_cfg.bind))?;
+    let (listener, addr) = match handle.block_on(clipboardwire_core::server::bind(&server_cfg)) {
+        Ok((l, a)) => l_and_a_clear(state, l, a),
+        Err(e) => {
+            // Visible failure: the user almost always hits this when
+            // they have a second clipboardwire process running. Store
+            // the message so the status item + tooltip can show it.
+            let msg = format!("{} ({})", server_cfg.bind, friendly_bind_error(&e));
+            state.hub_bind_error = Some(msg.clone());
+            return Err(e).with_context(|| format!("binding embedded hub to {}", server_cfg.bind));
+        }
+    };
     info!(addr = %addr, "embedded hub bound");
 
     let scheme = if !server_cfg.tls_disabled {
@@ -488,12 +503,30 @@ fn update_hub_menu(state: &State, start: &MenuItem, stop: &MenuItem, restart: &M
 
 /// Refresh the disabled "Status: …" menu item text from the current state.
 fn update_status_item(item: &MenuItem, state: &State) {
-    item.set_text(status_label_for(state.client_status, state.cfg.is_some()));
+    item.set_text(status_label_with_hub(
+        state.client_status,
+        state.cfg.is_some(),
+        state.hub_bind_error.as_deref(),
+    ));
 }
 
 /// Render the user-facing status label. Kept short + prefix-stable so
 /// the menu doesn't reflow on every status change.
 fn status_label_for(status: Option<ClientStatus>, has_cfg: bool) -> String {
+    status_label_with_hub(status, has_cfg, None)
+}
+
+/// Variant of [`status_label_for`] that prioritises a hub-bind failure
+/// when one is present — that's the user-actionable problem and they
+/// shouldn't have to dig through logs to see it.
+fn status_label_with_hub(
+    status: Option<ClientStatus>,
+    has_cfg: bool,
+    hub_bind_error: Option<&str>,
+) -> String {
+    if let Some(err) = hub_bind_error {
+        return format!("Status: hub bind failed — {err}");
+    }
     if !has_cfg {
         return "Status: needs configuration".to_string();
     }
@@ -508,8 +541,38 @@ fn status_label_for(status: Option<ClientStatus>, has_cfg: bool) -> String {
     }
 }
 
+/// Helper used inside `start_embedded_hub_with_cfg` to clear the
+/// "hub bind failed" sticky state once a fresh bind has succeeded.
+fn l_and_a_clear<L, A>(state: &mut State, listener: L, addr: A) -> (L, A) {
+    state.hub_bind_error = None;
+    (listener, addr)
+}
+
+/// Best-effort: shorten the typical OS errors into a human phrase. The
+/// "address already in use" case is the one we expect 95% of the time.
+fn friendly_bind_error(e: &anyhow::Error) -> String {
+    let s = format!("{e:#}");
+    let lower = s.to_lowercase();
+    if lower.contains("address already in use") || lower.contains("address in use") {
+        "another process is already on this port".to_string()
+    } else if lower.contains("permission denied") {
+        "permission denied".to_string()
+    } else {
+        // Keep just the deepest message — anyhow's chain is noisy.
+        s.lines().last().unwrap_or("bind failed").to_string()
+    }
+}
+
 /// Refresh the tray tooltip from current state.
 fn refresh_tooltip(tray: &TrayIcon, state: &State, config_path: &Path) {
+    // Hub bind failure wins the tooltip — it's the actionable problem.
+    if let Some(err) = &state.hub_bind_error {
+        let _ = tray.set_tooltip(Some(format!(
+            "clipboardwire — hub bind failed ({err})\n{}",
+            config_path.display()
+        )));
+        return;
+    }
     let tip = match (&state.cfg, state.client_status) {
         (None, _) => format!(
             "clipboardwire — needs config (right-click → Edit config)\n{}",

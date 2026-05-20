@@ -11,6 +11,7 @@
     windows_subsystem = "windows"
 )]
 
+mod instance;
 mod settings;
 mod tray;
 
@@ -126,6 +127,21 @@ async fn run_headless(cli: Cli, cmd: Command) -> Result<()> {
         Command::Host => run_host_headless(cli.config.as_deref()).await,
         Command::Settings => unreachable!("settings handled before runtime build"),
     }
+}
+
+/// Pick the directory the singleton-lock file lives in. We co-locate
+/// it with the config file (or its platform default) so users find
+/// "what is this `clipboardwire.lock` file" right where they expect.
+fn singleton_lock_dir(override_path: Option<&std::path::Path>) -> Result<PathBuf> {
+    let config_path = match override_path {
+        Some(p) => p.to_path_buf(),
+        None => ClientConfig::default_path()
+            .context("could not determine the default config path for the singleton lock")?,
+    };
+    Ok(config_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from(".")))
 }
 
 /// Build the server config used by `clipboardwire serve`.
@@ -271,6 +287,20 @@ fn build_host_client_config(
 /// dispatches right-click, menu activation, etc. The tokio runtime stays
 /// alive on its worker threads for the duration of the loop.
 fn run_with_tray(runtime: tokio::runtime::Runtime, cli: Cli, cmd: Command) -> Result<()> {
+    // Take the singleton lock *first*, before bringing up the tray or
+    // the embedded hub. Two trays would race on the hub port and the
+    // arboard X11 connection — and previously did, manifesting as
+    // "client cycles connect/disconnect every few seconds." See
+    // `instance::acquire_or_fail`.
+    let lock_dir = singleton_lock_dir(cli.config.as_deref())?;
+    if let Err(e) = instance::acquire_or_fail(&lock_dir) {
+        tracing::error!(
+            error = %format!("{e:#}"),
+            "another clipboardwire instance is already running; exiting"
+        );
+        return Ok(());
+    }
+
     let (config_path, initial_cfg, host_hub_handle, auto_open_settings) = match cmd {
         Command::Connect => {
             let (path, cfg, auto_open) = prepare_connect_tray_args(cli.config.as_deref())?;

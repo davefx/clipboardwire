@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=clipboardwire
+GenericName=Clipboard Sync
+Comment=Sync the clipboard between trusted devices over a LAN/VPN
+Exec=clipboardwire
+Icon=clipboardwire
+Terminal=false
+Categories=Utility;Network;
+Keywords=clipboard;sync;copy;paste;
+StartupNotify=false
+# Run in tray mode by default. Multiple invocations are guarded by an
+# advisory lock file in the user's config dir, so launching this from
+# the apps menu + having it in /etc/xdg/autostart at the same time
+# won't spawn two trays.

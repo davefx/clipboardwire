@@ -6,7 +6,7 @@ members = ["core", "cli"]
 version = "0.3.2"
 edition = "2021"
 license = "GPL-3.0-or-later"
-rust-version = "1.85"
+rust-version = "1.89"
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
