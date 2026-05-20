@@ -57,6 +57,9 @@ jobs:
       - name: GUI interaction (DBus menu + Edit/Reload/Quit) — Linux
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a cargo test --workspace --test tray_dbus_linux -- --ignored
+      - name: Singleton lock (second tray exits) — Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a cargo test --workspace --test singleton_lock -- --ignored --nocapture
       - name: GUI interaction (embedded hub binds) — Linux
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a cargo test --workspace --test hub_mode -- --ignored
@@ -66,3 +69,6 @@ jobs:
       - name: GUI interaction (UIA tray discovery) — Windows
         if: matrix.os == 'windows-latest'
         run: cargo test --workspace --test tray_uia_windows -- --ignored --nocapture
+      - name: Singleton lock (second tray exits) — Windows
+        if: matrix.os == 'windows-latest'
+        run: cargo test --workspace --test singleton_lock -- --ignored --nocapture

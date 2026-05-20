@@ -294,10 +294,13 @@ fn run_with_tray(runtime: tokio::runtime::Runtime, cli: Cli, cmd: Command) -> Re
     // `instance::acquire_or_fail`.
     let lock_dir = singleton_lock_dir(cli.config.as_deref())?;
     if let Err(e) = instance::acquire_or_fail(&lock_dir) {
-        tracing::error!(
-            error = %format!("{e:#}"),
-            "another clipboardwire instance is already running; exiting"
-        );
+        // Emit BOTH a tracing diagnostic (for log-collectors / journald)
+        // AND an `eprintln!` (so the message reaches stderr even when
+        // tracing's fmt writer is line-buffered and the process exits
+        // before its flush — see `singleton_lock` integration test).
+        let msg = format!("another clipboardwire instance is already running: {e:#}");
+        tracing::error!("{msg}");
+        eprintln!("clipboardwire: {msg}");
         return Ok(());
     }
 
