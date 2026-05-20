@@ -34,13 +34,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install Linux tray build + runtime deps (incl. xvfb for GUI smoke)
+      - name: Install Linux tray build + runtime deps (incl. xvfb + dbus for GUI tests)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libxdo-dev xvfb
+        run: |
+          sudo apt-get install -y \
+            libgtk-3-dev libayatana-appindicator3-dev libxdo-dev \
+            xvfb dbus
       - run: cargo test --workspace
       - name: GUI smoke (tray init) — Linux under xvfb
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a cargo test --workspace -- --ignored connect_tray
+      - name: GUI interaction (DBus menu + Edit/Reload/Quit) — Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a cargo test --workspace --test tray_dbus_linux -- --ignored
+      - name: GUI interaction (embedded hub binds) — Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a cargo test --workspace --test hub_mode -- --ignored
       - name: GUI smoke (tray init) — Windows
         if: matrix.os == 'windows-latest'
         run: cargo test --workspace -- --ignored connect_tray

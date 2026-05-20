@@ -12,16 +12,32 @@
 //! ```
 
 use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+use crate::protocol::MAX_FRAME_BYTES;
+use crate::server::ServerConfig;
 
 fn default_poll_ms() -> u64 {
     300
 }
 
-#[derive(Debug, Clone, Deserialize)]
+fn default_hub_bind() -> SocketAddr {
+    "0.0.0.0:8484".parse().expect("static address")
+}
+
+fn default_hub_max_conns() -> usize {
+    64
+}
+
+fn default_hub_max_frame() -> usize {
+    MAX_FRAME_BYTES
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
     /// WebSocket endpoint, e.g. `ws://nas.lan:8484/sync` or `wss://…`.
@@ -36,13 +52,86 @@ pub struct ClientConfig {
     /// Optional PEM-encoded CA bundle. Certificates here are trusted *in
     /// addition to* the built-in Mozilla root list. Use this to trust a
     /// self-signed server certificate.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_ca_file: Option<std::path::PathBuf>,
     /// **DANGEROUS.** When `true`, the client skips TLS certificate
     /// validation entirely. Only safe on a fully trusted network (e.g.
     /// loopback in `host` mode). Default `false`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub tls_insecure: bool,
+    /// Optional `[hub]` section. When `hub.enabled = true`, launching
+    /// `clipboardwire connect --tray` first binds a hub server in-process,
+    /// then connects the local client to it over loopback. Useful when
+    /// you want one machine to be both the relay and a clipboard
+    /// participant without running two `clipboardwire` invocations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hub: Option<HubConfig>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HubConfig {
+    /// Whether to bring up a hub on this machine alongside the client.
+    #[serde(default)]
+    pub enabled: bool,
+    /// `host:port` to bind to. Default `0.0.0.0:8484`.
+    #[serde(default = "default_hub_bind")]
+    pub bind: SocketAddr,
+    /// HTTP Basic auth username for the hub. Other clients connect with
+    /// this user; the local in-process client always passes auth so
+    /// it doesn't need to match `ClientConfig::user`, but using the same
+    /// credentials keeps the config simple.
+    pub user: String,
+    /// HTTP Basic auth password for the hub.
+    pub password: String,
+    /// Maximum concurrent connected clients.
+    #[serde(default = "default_hub_max_conns")]
+    pub max_conns: usize,
+    /// Maximum WebSocket frame size, in bytes.
+    #[serde(default = "default_hub_max_frame")]
+    pub max_frame_bytes: usize,
+    /// Optional PEM cert file. When set together with `tls_key_file`,
+    /// the hub speaks `wss://`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_cert_file: Option<PathBuf>,
+    /// Optional PEM key file. Required iff `tls_cert_file` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_key_file: Option<PathBuf>,
+}
+
+impl Default for HubConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            bind: default_hub_bind(),
+            user: String::new(),
+            password: String::new(),
+            max_conns: default_hub_max_conns(),
+            max_frame_bytes: default_hub_max_frame(),
+            tls_cert_file: None,
+            tls_key_file: None,
+        }
+    }
+}
+
+impl HubConfig {
+    /// Convert this hub config into the [`ServerConfig`] the existing
+    /// `server::bind` / `server::serve` helpers expect.
+    pub fn to_server_config(&self) -> ServerConfig {
+        ServerConfig {
+            bind: self.bind,
+            user: self.user.clone(),
+            password: self.password.clone(),
+            max_conns: self.max_conns,
+            max_frame_bytes: self.max_frame_bytes,
+            tls_cert_file: self.tls_cert_file.clone(),
+            tls_key_file: self.tls_key_file.clone(),
+        }
+    }
 }
 
 impl ClientConfig {

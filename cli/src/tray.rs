@@ -21,7 +21,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clipboardwire_core::client::ClientConfig;
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
@@ -128,11 +128,8 @@ pub fn run(
                     }
                     *control_flow = ControlFlow::Exit;
                 } else if menu_event.id == edit_id {
-                    if let Err(e) = ensure_template_exists(&config_path) {
-                        warn!(error = %format!("{e:#}"), "could not write template config");
-                    }
-                    if let Err(e) = open_in_editor(&config_path) {
-                        warn!(error = %format!("{e:#}"), "could not open config in editor");
+                    if let Err(e) = launch_settings_dialog(&config_path) {
+                        warn!(error = %format!("{e:#}"), "could not launch settings dialog");
                     }
                 } else if menu_event.id == reload_id {
                     if let Some(s) = supervisor.take() {
@@ -220,25 +217,19 @@ fn spawn_supervisor(
     })
 }
 
-/// If `path` doesn't exist, write the placeholder template + chmod 0600.
-fn ensure_template_exists(path: &Path) -> Result<()> {
-    if !path.exists() {
-        ClientConfig::write_template(path)?;
-        info!(path = %path.display(), "wrote template config");
-    }
-    Ok(())
-}
-
-/// Open `path` in the platform's default text editor (best-effort).
-fn open_in_editor(path: &Path) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    let cmd = "notepad";
-    #[cfg(target_os = "macos")]
-    let cmd = "open";
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let cmd = "xdg-open";
-
-    std::process::Command::new(cmd).arg(path).spawn()?;
+/// Launch `clipboardwire settings --config <path>` as a subprocess.
+/// The settings binary opens its own eframe window with a form for the
+/// client config; saving writes the TOML and the user can then click
+/// "Reload config" in the tray.
+fn launch_settings_dialog(path: &Path) -> Result<()> {
+    let exe = std::env::current_exe().context("locating current_exe")?;
+    std::process::Command::new(exe)
+        .arg("settings")
+        .arg("--config")
+        .arg(path)
+        .spawn()
+        .context("spawning settings subprocess")?;
+    info!(path = %path.display(), "settings dialog launched");
     Ok(())
 }
 

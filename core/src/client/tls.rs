@@ -128,6 +128,7 @@ mod tests {
             poll_ms: 300,
             tls_ca_file: None,
             tls_insecure: false,
+            hub: None,
         }
     }
 

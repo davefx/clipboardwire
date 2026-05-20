@@ -21,6 +21,13 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 tray-icon = "0.22"
 tao = "0.34"
+eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+toml = "0.9"
+serde = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+zbus = { version = "5", features = ["tokio"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # -- Native packaging metadata --
 # Build .deb:  cargo install cargo-deb && cargo deb -p clipboardwire

@@ -38,6 +38,7 @@ fn client_cfg(addr: std::net::SocketAddr) -> ClientConfig {
         poll_ms: 1000,
         tls_ca_file: None,
         tls_insecure: false,
+        hub: None,
     }
 }
 
