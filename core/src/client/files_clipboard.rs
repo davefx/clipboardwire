@@ -274,18 +274,93 @@ mod backend {
 mod backend {
     use std::path::PathBuf;
 
-    use anyhow::Result;
+    use anyhow::{anyhow, Context, Result};
+    use objc2::rc::Retained;
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+    use objc2_foundation::{NSArray, NSString, NSURL};
 
-    // TODO(macos): use NSPasteboard with NSPasteboardTypeFileURL.
-    // For now the macOS build links against this stub so the file
-    // transfer wire path still works via the `clipboardwire send`
-    // CLI command — only the auto-pickup-from-clipboard UX is
-    // missing. Tracked in #33's follow-up.
     pub fn read_files() -> Result<Option<Vec<PathBuf>>> {
-        Ok(None)
+        // SAFETY: NSPasteboard's `generalPasteboard` is thread-safe per
+        // AppKit's documentation. We only borrow Retained handles
+        // briefly to read primitive data; no UI work happens here.
+        unsafe {
+            let pasteboard = NSPasteboard::generalPasteboard();
+
+            // Fast path: check whether any of the available types
+            // is the file-URL UTI before iterating items.
+            let Some(types) = pasteboard.types() else {
+                return Ok(None);
+            };
+            let mut has_file_url = false;
+            for t in types.iter() {
+                if &*t == &**NSPasteboardTypeFileURL {
+                    has_file_url = true;
+                    break;
+                }
+            }
+            if !has_file_url {
+                return Ok(None);
+            }
+
+            let Some(items) = pasteboard.pasteboardItems() else {
+                return Ok(None);
+            };
+            let mut paths = Vec::new();
+            for item in items.iter() {
+                let Some(url_str) = item.stringForType(NSPasteboardTypeFileURL) else {
+                    continue;
+                };
+                // url_str is e.g. "file:///Users/alice/foo.pdf"
+                let Some(url) = NSURL::URLWithString(&url_str) else {
+                    continue;
+                };
+                let Some(path) = url.path() else { continue };
+                paths.push(PathBuf::from(path.to_string()));
+            }
+            if paths.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(paths))
+            }
+        }
     }
 
-    pub fn write_files(_paths: &[PathBuf]) -> Result<()> {
+    pub fn write_files(paths: &[PathBuf]) -> Result<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        unsafe {
+            let pasteboard = NSPasteboard::generalPasteboard();
+            // Clear before writing so we own the pasteboard contents
+            // entirely (NSPasteboard mixes additive vs replace
+            // semantics; we want replace).
+            pasteboard.clearContents();
+
+            // Build [NSURL] and writeObjects.
+            let urls: Vec<Retained<NSURL>> = paths
+                .iter()
+                .map(|p| {
+                    let s = NSString::from_str(&p.to_string_lossy());
+                    NSURL::fileURLWithPath(&s)
+                })
+                .collect();
+            // NSArray<NSURL> from Vec<Retained<NSURL>>.
+            let url_refs: Vec<&NSURL> = urls.iter().map(|u| &**u).collect();
+            let array: Retained<NSArray<NSURL>> = NSArray::from_slice(&url_refs);
+
+            // `writeObjects` takes ProtocolObject<dyn NSPasteboardWriting>.
+            // NSURL conforms; we cast via the typed-array wrapper.
+            // SAFETY: NSURL implements NSPasteboardWriting since 10.6.
+            let writable: &NSArray<
+                objc2::runtime::ProtocolObject<dyn objc2_app_kit::NSPasteboardWriting>,
+            > = std::mem::transmute(&*array);
+            let ok = pasteboard.writeObjects(writable);
+            if !ok {
+                return Err(anyhow!("NSPasteboard.writeObjects returned NO"))
+                    .context("setting file URLs on NSPasteboard");
+            }
+        }
         Ok(())
     }
 }
