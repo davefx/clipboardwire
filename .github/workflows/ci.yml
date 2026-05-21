@@ -81,3 +81,12 @@ jobs:
       - name: GUI interaction (embedded hub binds) — macOS
         if: matrix.os == 'macos-latest'
         run: cargo test --workspace --test hub_mode -- --ignored
+      - name: File-clipboard roundtrip — Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a cargo test --workspace --test clipboard_files_roundtrip -- --ignored --nocapture
+      - name: File-clipboard roundtrip — Windows
+        if: matrix.os == 'windows-latest'
+        run: cargo test --workspace --test clipboard_files_roundtrip -- --ignored --nocapture
+      - name: File-clipboard roundtrip — macOS
+        if: matrix.os == 'macos-latest'
+        run: cargo test --workspace --test clipboard_files_roundtrip -- --ignored --nocapture

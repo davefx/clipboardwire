@@ -44,6 +44,8 @@ pub fn write_files(paths: &[PathBuf]) -> Result<()> {
 #[cfg(target_os = "linux")]
 mod backend {
     use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::sync::OnceLock;
     use std::time::Duration;
 
     use anyhow::{Context, Result};
@@ -54,8 +56,28 @@ mod backend {
     /// for "is the clipboard holding files."
     const LOAD_TIMEOUT: Duration = Duration::from_millis(200);
 
-    pub fn read_files() -> Result<Option<Vec<PathBuf>>> {
+    /// Long-lived X11 clipboard handle. We *must* keep one
+    /// `Clipboard` alive for the whole process lifetime — on X11
+    /// the selection owner is identified by the underlying X
+    /// connection, so dropping it releases the selection. Without
+    /// this OnceLock, every `write_files` set the selection and
+    /// then immediately gave it up, which made our paste support
+    /// look broken even on a perfectly functional X session.
+    fn clipboard() -> Result<&'static Mutex<Clipboard>> {
+        static CB: OnceLock<Mutex<Clipboard>> = OnceLock::new();
+        if let Some(c) = CB.get() {
+            return Ok(c);
+        }
         let cb = Clipboard::new().context("opening X11 clipboard")?;
+        // race-tolerant set: if another thread won, drop ours.
+        let _ = CB.set(Mutex::new(cb));
+        Ok(CB.get().expect("OnceLock just set"))
+    }
+
+    pub fn read_files() -> Result<Option<Vec<PathBuf>>> {
+        let cb = clipboard()?
+            .lock()
+            .map_err(|_| anyhow::anyhow!("X11 clipboard mutex poisoned"))?;
         let uri_list = cb
             .getter
             .get_atom("text/uri-list")
@@ -79,7 +101,9 @@ mod backend {
         if paths.is_empty() {
             return Ok(());
         }
-        let cb = Clipboard::new().context("opening X11 clipboard")?;
+        let cb = clipboard()?
+            .lock()
+            .map_err(|_| anyhow::anyhow!("X11 clipboard mutex poisoned"))?;
         let uri_list_atom = cb
             .setter
             .get_atom("text/uri-list")
