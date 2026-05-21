@@ -72,3 +72,12 @@ jobs:
       - name: Singleton lock (second tray exits) — Windows
         if: matrix.os == 'windows-latest'
         run: cargo test --workspace --test singleton_lock -- --ignored --nocapture
+      - name: GUI smoke (tray init) — macOS
+        if: matrix.os == 'macos-latest'
+        run: cargo test --workspace -- --ignored connect_tray
+      - name: Singleton lock (second tray exits) — macOS
+        if: matrix.os == 'macos-latest'
+        run: cargo test --workspace --test singleton_lock -- --ignored --nocapture
+      - name: GUI interaction (embedded hub binds) — macOS
+        if: matrix.os == 'macos-latest'
+        run: cargo test --workspace --test hub_mode -- --ignored

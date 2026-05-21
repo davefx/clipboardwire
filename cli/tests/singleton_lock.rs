@@ -104,6 +104,12 @@ fn spawn_tray(sandbox: &Path, capture_stderr: bool) -> Child {
         cmd.env("XDG_CONFIG_HOME", sandbox);
         cmd.env("HOME", sandbox);
     }
+    #[cfg(target_os = "macos")]
+    {
+        // BaseDirs on macOS reads HOME and builds
+        // `$HOME/Library/Application Support/clipboardwire/`.
+        cmd.env("HOME", sandbox);
+    }
     #[cfg(windows)]
     {
         cmd.env("APPDATA", sandbox);
