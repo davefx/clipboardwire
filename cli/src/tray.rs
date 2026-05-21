@@ -149,7 +149,7 @@ pub fn run(
         dark_light::detect().ok()
     };
     let tray = TrayIconBuilder::new()
-        .with_icon(build_icon(theme))
+        .with_icon(build_icon(theme, None, false))
         .with_menu(Box::new(menu))
         .with_tooltip(initial_tooltip)
         .build()?;
@@ -177,6 +177,7 @@ pub fn run(
     apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
     update_status_item(&status_item, &state);
+    refresh_icon(&tray, theme, &state);
 
     // First-run / no-valid-config flow: pop the settings GUI so the
     // user has somewhere obvious to fix things from.
@@ -219,6 +220,8 @@ pub fn run(
                     reload_config_into(&mut state, &config_path);
                     apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+                    update_status_item(&status_item, &state);
+                    refresh_icon(&tray, theme, &state);
                 } else if menu_event.id == start_hub_id {
                     if let Err(e) =
                         start_embedded_hub(runtime.handle(), &proxy, &mut state, &config_path)
@@ -226,9 +229,13 @@ pub fn run(
                         warn!(error=%format!("{e:#}"), "Start hub failed");
                     }
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+                    update_status_item(&status_item, &state);
+                    refresh_tooltip(&tray, &state, &config_path);
+                    refresh_icon(&tray, theme, &state);
                 } else if menu_event.id == stop_hub_id {
                     stop_embedded_hub(&mut state);
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+                    refresh_icon(&tray, theme, &state);
                 } else if menu_event.id == restart_hub_id {
                     stop_embedded_hub(&mut state);
                     if let Err(e) =
@@ -237,6 +244,9 @@ pub fn run(
                         warn!(error=%format!("{e:#}"), "Restart hub failed");
                     }
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+                    update_status_item(&status_item, &state);
+                    refresh_tooltip(&tray, &state, &config_path);
+                    refresh_icon(&tray, theme, &state);
                 } else {
                     warn!(id = ?menu_event.id, "ignoring unknown menu event");
                 }
@@ -253,6 +263,7 @@ pub fn run(
                 );
                 update_status_item(&status_item, &state);
                 refresh_tooltip(&tray, &state, &config_path);
+                refresh_icon(&tray, theme, &state);
             }
             Event::UserEvent(UserEvent::HubExited {
                 generation,
@@ -268,6 +279,7 @@ pub fn run(
                 state.client_status = Some(status);
                 update_status_item(&status_item, &state);
                 refresh_tooltip(&tray, &state, &config_path);
+                refresh_icon(&tray, theme, &state);
             }
             Event::UserEvent(UserEvent::SettingsExited) => {
                 info!("settings dialog closed; auto-reloading config");
@@ -278,6 +290,7 @@ pub fn run(
                 update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
                 update_status_item(&status_item, &state);
                 refresh_tooltip(&tray, &state, &config_path);
+                refresh_icon(&tray, theme, &state);
             }
             _ => {}
         }
@@ -510,6 +523,13 @@ fn update_status_item(item: &MenuItem, state: &State) {
     ));
 }
 
+/// Hot-swap the tray icon with one whose colored status dot matches
+/// the current state. Called from every place that bumps status.
+fn refresh_icon(tray: &TrayIcon, theme: Option<dark_light::Mode>, state: &State) {
+    let icon = build_icon(theme, state.client_status, state.hub_bind_error.is_some());
+    let _ = tray.set_icon(Some(icon));
+}
+
 /// Render the user-facing status label. Kept short + prefix-stable so
 /// the menu doesn't reflow on every status change.
 fn status_label_for(status: Option<ClientStatus>, has_cfg: bool) -> String {
@@ -619,8 +639,13 @@ fn launch_settings_dialog(path: &Path, proxy: &EventLoopProxy<UserEvent>) -> Res
 }
 
 /// Load the bundled tray icon, choosing a colour-/monochrome variant
-/// based on the user's current system theme.
-fn build_icon(theme: Option<dark_light::Mode>) -> tray_icon::Icon {
+/// based on the user's current system theme and overlaying a small
+/// status dot in the bottom-right corner.
+fn build_icon(
+    theme: Option<dark_light::Mode>,
+    status: Option<ClientStatus>,
+    hub_bind_error: bool,
+) -> tray_icon::Icon {
     const ICON_COLOR: &[u8] = include_bytes!("../../assets/icon-32.png");
     const ICON_MONO_DARK: &[u8] = include_bytes!("../../assets/icon-mono-dark-32.png");
     const ICON_MONO_LIGHT: &[u8] = include_bytes!("../../assets/icon-mono-light-32.png");
@@ -633,7 +658,55 @@ fn build_icon(theme: Option<dark_light::Mode>) -> tray_icon::Icon {
 
     let img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
         .expect("embedded tray icon PNG decodes");
-    let rgba = img.to_rgba8();
+    let mut rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
+
+    // Pick an overlay colour. Hub-bind failure dominates (the user
+    // can't ignore it). Otherwise track the client status:
+    // - green: connected
+    // - amber: connecting (transient)
+    // - red:   disconnected → retrying
+    // - none:  no supervisor / starting up (don't add a dot — the bare
+    //          icon is the right signal for "config-needed")
+    let overlay = if hub_bind_error {
+        Some([220u8, 60, 60, 255])
+    } else {
+        match status {
+            Some(ClientStatus::Connected) => Some([60u8, 180, 80, 255]),
+            Some(ClientStatus::Connecting) => Some([235u8, 175, 50, 255]),
+            Some(ClientStatus::Disconnected { .. }) => Some([220u8, 60, 60, 255]),
+            None => None,
+        }
+    };
+
+    if let Some(colour) = overlay {
+        draw_status_dot(&mut rgba, width, height, colour);
+    }
+
     tray_icon::Icon::from_rgba(rgba.into_raw(), width, height).expect("tray-icon accepts RGBA")
+}
+
+/// Composite a filled circle (with a 1-px contrast halo) in the
+/// bottom-right of the tray icon. Drawn directly into the RGBA buffer
+/// to avoid pulling in an extra drawing crate.
+fn draw_status_dot(rgba: &mut image::RgbaImage, width: u32, height: u32, color: [u8; 4]) {
+    let r = (width.min(height) as i32) * 7 / 20; // ≈ 35% of the icon side
+    let cx = width as i32 - r - 1;
+    let cy = height as i32 - r - 1;
+    let halo_r = r + 1;
+
+    for y in 0..height as i32 {
+        for x in 0..width as i32 {
+            let dx = x - cx;
+            let dy = y - cy;
+            let d2 = dx * dx + dy * dy;
+            if d2 <= r * r {
+                rgba.put_pixel(x as u32, y as u32, image::Rgba(color));
+            } else if d2 <= halo_r * halo_r {
+                // 1-px translucent dark halo so the dot reads against
+                // a light tray and the icon itself stays visible.
+                rgba.put_pixel(x as u32, y as u32, image::Rgba([0, 0, 0, 200]));
+            }
+        }
+    }
 }

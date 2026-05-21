@@ -42,12 +42,20 @@ pub fn run(config_path: PathBuf) -> Result<()> {
 
     let app = SettingsApp::new(config_path, initial, saved.clone());
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([520.0, 360.0])
+        .with_min_inner_size([420.0, 320.0])
+        .with_resizable(true)
+        .with_title(WINDOW_TITLE)
+        // App ID matches the .desktop filename so GNOME / KDE attach
+        // the right launcher icon to the window in the taskbar.
+        .with_app_id("clipboardwire");
+    if let Some(icon) = load_window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([520.0, 360.0])
-            .with_min_inner_size([420.0, 320.0])
-            .with_resizable(true)
-            .with_title(WINDOW_TITLE),
+        viewport,
         ..Default::default()
     };
 
@@ -66,6 +74,21 @@ pub fn run(config_path: PathBuf) -> Result<()> {
     } else {
         anyhow::bail!("settings dialog cancelled")
     }
+}
+
+/// Decode the bundled 256-px clipboardwire icon into the egui IconData
+/// shape so the Settings window shows our branding in the title bar /
+/// taskbar instead of the default eframe "e".
+fn load_window_icon() -> Option<egui::IconData> {
+    const ICON_PNG: &[u8] = include_bytes!("../../assets/icon-256.png");
+    let img = image::load_from_memory_with_format(ICON_PNG, image::ImageFormat::Png).ok()?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Some(egui::IconData {
+        rgba: rgba.into_raw(),
+        width,
+        height,
+    })
 }
 
 fn load_or_default(path: &Path) -> FormState {
