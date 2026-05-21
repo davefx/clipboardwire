@@ -1,0 +1,67 @@
+name: Bump Homebrew cask
+
+# Fires after a release is published. Rewrites the cask in
+# davefx/homebrew-clipboardwire so `brew upgrade --cask clipboardwire`
+# picks up the new version automatically. The release.yml workflow
+# uploads the .dmg first; this one then reads the new URL + SHA-256.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute new version + SHA-256
+        id: vars
+        run: |
+          set -euo pipefail
+          # tag → 0.X.Y (strip leading 'v')
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG_URL="https://github.com/davefx/clipboardwire/releases/download/v${VERSION}/clipboardwire-macos-universal.dmg"
+          curl -sL -o /tmp/clipboardwire.dmg "$DMG_URL"
+          SHA256=$(sha256sum /tmp/clipboardwire.dmg | awk '{print $1}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256"   >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: davefx/homebrew-clipboardwire
+          # A personal access token with `repo` scope is needed here
+          # because the default GITHUB_TOKEN is scoped to this repo.
+          # The secret name `HOMEBREW_TAP_TOKEN` must be set in the
+          # main repo's Settings → Secrets → Actions.
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Rewrite the cask
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.vars.outputs.version }}"
+          SHA256="${{ steps.vars.outputs.sha256 }}"
+          cd tap
+          # Replace the version + sha256 lines, leaving everything
+          # else untouched (URL is templated off `version` so it
+          # picks up the bump automatically).
+          sed -i.bak -E "s/^( *version *).*/\1\"$VERSION\"/" Casks/clipboardwire.rb
+          sed -i.bak -E "s/^( *sha256 *).*/\1\"$SHA256\"/"   Casks/clipboardwire.rb
+          rm -f Casks/clipboardwire.rb.bak
+
+      - name: Commit + push if changed
+        run: |
+          set -euo pipefail
+          cd tap
+          if git diff --quiet; then
+            echo "No cask changes — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/clipboardwire.rb
+          git commit -m "Bump clipboardwire cask to ${{ steps.vars.outputs.version }}"
+          git push

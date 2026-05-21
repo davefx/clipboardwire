@@ -4,7 +4,7 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
-## [0.4.0] — 2026-05-21
+## [Unreleased] — v0.4.0 in progress
 
 ### Added
 - **Tray icon status overlay.** Colored dot in the bottom-right of the
@@ -21,6 +21,10 @@ follows [Semantic Versioning](https://semver.org).
 - **Settings window icon.** eframe's ViewportBuilder now `.with_icon`
   and `.with_app_id` so the title bar / taskbar entry / alt-tab
   thumbnail all match the tray + .desktop launcher.
+- **Homebrew tap** ([davefx/homebrew-clipboardwire](https://github.com/davefx/homebrew-clipboardwire)).
+  `brew install --cask davefx/clipboardwire/clipboardwire` does the
+  DMG drag-into-Applications dance automatically. A GitHub Action
+  in this repo bumps the cask on every release.
 - **macOS .app bundle + .dmg.** Release workflow assembles a proper
   `clipboardwire.app` (Info.plist + .icns generated from the bundled
   PNG, LSUIElement=true so it lives in the menu bar) and an
@@ -164,7 +168,6 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
-[0.4.0]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.0
 [0.3.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.3.3
 [0.3.2]: https://github.com/davefx/clipboardwire/releases/tag/v0.3.2
 [0.3.1]: https://github.com/davefx/clipboardwire/releases/tag/v0.3.1

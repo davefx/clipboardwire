@@ -66,50 +66,40 @@ single-user / personal-use deployment on a LAN or VPN.
 ### Linux (deb)
 
 ```sh
-curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire_0.4.0-1_amd64.deb
-sudo apt install ./clipboardwire_0.4.0-1_amd64.deb
+curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire_0.3.3-1_amd64.deb
+sudo apt install ./clipboardwire_0.3.3-1_amd64.deb
 clipboardwire   # opens the tray; first run pops the Settings dialog
 ```
 
 ### Linux (rpm)
 
 ```sh
-curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-0.4.0-1.x86_64.rpm
-sudo dnf install ./clipboardwire-0.4.0-1.x86_64.rpm
+curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-0.3.3-1.x86_64.rpm
+sudo dnf install ./clipboardwire-0.3.3-1.x86_64.rpm
 ```
 
 ### Windows
 
-Download `clipboardwire-0.4.0-x86_64.msi` from the
+Download `clipboardwire-0.3.3-x86_64.msi` from the
 [latest release](https://github.com/davefx/clipboardwire/releases/latest)
 and double-click it. The installer creates a Start Menu shortcut, a Desktop
 shortcut, and registers a `HKCU\Run` entry so the tray comes up at login.
 
 ### macOS
 
-Download `clipboardwire-macos-universal.dmg` from the
-[latest release](https://github.com/davefx/clipboardwire/releases/latest)
-and double-click. The DMG opens a window with the `clipboardwire.app`
-bundle next to an `Applications` shortcut — drag the app over.
+A universal binary (Apple Silicon + Intel) is attached to each release.
 
 ```sh
-# Alternative: command line
-curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-macos-universal.dmg
-hdiutil attach clipboardwire-macos-universal.dmg
-cp -R "/Volumes/clipboardwire/clipboardwire.app" /Applications/
-hdiutil detach "/Volumes/clipboardwire"
-open /Applications/clipboardwire.app
+curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-macos-universal
+chmod +x clipboardwire-macos-universal
+sudo mv clipboardwire-macos-universal /usr/local/bin/clipboardwire
+clipboardwire
 ```
 
-The binary is unsigned, so the first launch shows a "cannot verify
-developer" warning. Open *System Settings → Privacy & Security*,
-scroll to the bottom, and click *Open Anyway*.
-
-clipboardwire lives in the menu bar (LSUIElement) — no dock icon. A
-Homebrew tap is on the v0.5 roadmap.
-
-Prefer the raw universal binary? Replace the `.dmg` URL above with
-`clipboardwire-macos-universal` (no extension) and `chmod +x` it.
+macOS will quarantine the unsigned binary. The first launch surfaces a
+"cannot verify developer" warning — open *System Settings → Privacy &
+Security*, scroll to the bottom, and click *Open Anyway*. A proper
+`.app` / `.dmg` bundle + a Homebrew tap will land with v0.4.
 
 ### Cargo (any platform with Rust 1.89+)
 
@@ -254,7 +244,7 @@ xvfb-run -a cargo test --workspace -- --ignored        # tray + DBus + UIA
 
 ## Status & roadmap
 
-Currently shipping: **v0.4.0** — see [CHANGELOG.md](CHANGELOG.md).
+Currently shipping: **v0.3.3** — see [CHANGELOG.md](CHANGELOG.md).
 
 Planned for v0.4:
 
