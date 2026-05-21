@@ -4,6 +4,37 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.4.0] — 2026-05-21
+
+### Added
+- **Tray icon status overlay.** Colored dot in the bottom-right of the
+  tray icon mirrors the menu's `Status: …` line — green = connected,
+  amber = connecting, red = disconnected / hub-bind failure, none =
+  needs config. Composited into the existing 32 px PNG at runtime
+  via `image`; no new asset files.
+- **"Pin from server" button** in the Settings dialog. One click does
+  a sync TLS handshake to the configured server URL, captures the
+  peer's end-entity certificate, writes it as PEM to
+  `<config_dir>/server-pinned.crt`, and points `tls_ca_file` at the
+  saved file. Removes the need to copy the cert manually or set
+  `tls_insecure = true`.
+- **Settings window icon.** eframe's ViewportBuilder now `.with_icon`
+  and `.with_app_id` so the title bar / taskbar entry / alt-tab
+  thumbnail all match the tray + .desktop launcher.
+- **macOS .app bundle + .dmg.** Release workflow assembles a proper
+  `clipboardwire.app` (Info.plist + .icns generated from the bundled
+  PNG, LSUIElement=true so it lives in the menu bar) and an
+  installer-style `.dmg` with an `/Applications` drag target. Also
+  ships the raw `.app` as a `.tar.gz` and keeps the previous
+  universal / per-arch binaries.
+
+### Notes
+- File-clipboard support is deferred to v0.5 — needs per-OS adapters
+  (X11 `text/uri-list`, Wayland `wl_data_device`, Windows `CF_HDROP`,
+  macOS `NSPasteboardTypeFileURL`) plus a protocol bump and a
+  streaming wire format for the typical sizes. The smaller v0.4
+  items ship first.
+
 ## [0.3.3] — 2026-05-21
 
 ### Added
@@ -133,6 +164,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.4.0]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.0
 [0.3.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.3.3
 [0.3.2]: https://github.com/davefx/clipboardwire/releases/tag/v0.3.2
 [0.3.1]: https://github.com/davefx/clipboardwire/releases/tag/v0.3.1
