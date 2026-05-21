@@ -26,6 +26,11 @@ toml = "0.9"
 serde = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
 dark-light = "2"
+# Sync rustls + sha2 for the Settings dialog's "Pin from server" button.
+# We use the same crypto provider as the core transport.
+rustls = "0.23"
+base64 = "0.22"
+sha2 = "0.10"
 
 [dev-dependencies]
 egui_kittest = { version = "0.32", features = ["eframe"] }

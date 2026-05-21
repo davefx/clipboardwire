@@ -185,6 +185,129 @@ impl SettingsApp {
             }
         }
     }
+
+    /// "Pin from server" button. Connects to `form.server`, captures
+    /// the peer's end-entity cert, writes it as PEM next to the
+    /// config file, and points `tls_ca_file` at the result. The user
+    /// still has to hit Save afterwards — this only stages the
+    /// change in the form.
+    fn pin_server_cert(&mut self) {
+        match pin_server_cert_impl(&self.form.server, &self.config_path) {
+            Ok((path, fingerprint)) => {
+                self.form.tls_ca_file = path.to_string_lossy().into_owned();
+                self.form.tls_insecure = false;
+                self.form.last_error = Some(format!(
+                    "Pinned cert at {}\nSHA-256 {fingerprint}",
+                    path.display()
+                ));
+            }
+            Err(e) => {
+                self.form.last_error = Some(format!("Could not pin server cert: {e:#}"));
+            }
+        }
+    }
+}
+
+/// Open a TCP+TLS connection to the configured server URL, capture the
+/// server's end-entity certificate, write it to a PEM file alongside
+/// the config TOML, and return the path + SHA-256 fingerprint. The
+/// cert is captured *without* verification — the whole point of this
+/// button is to bootstrap trust on a self-signed cert.
+fn pin_server_cert_impl(server_url: &str, config_path: &Path) -> Result<(PathBuf, String)> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use rustls::pki_types::ServerName;
+    use rustls::ClientConnection;
+
+    let (host, port) = parse_wss_authority(server_url)?;
+
+    let mut sock = TcpStream::connect((host.as_str(), port))
+        .with_context(|| format!("connecting to {host}:{port}"))?;
+    sock.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    sock.set_write_timeout(Some(Duration::from_secs(5))).ok();
+
+    // rustls needs a CryptoProvider to be installed in the process
+    // before any ClientConfig is built. Tray + transport already do
+    // this lazily via aws_lc_rs; in the settings subprocess we have
+    // to install it ourselves on first use.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let cfg = Arc::new(clipboardwire_core::client::tls::make_insecure_client_config());
+    let name = ServerName::try_from(host.clone()).context("invalid hostname in server URL")?;
+    let mut conn = ClientConnection::new(cfg, name).context("starting TLS client connection")?;
+
+    let mut stream = rustls::Stream::new(&mut conn, &mut sock);
+    // Drive the handshake. `flush()` (or any read/write) will pump it
+    // until either the peer's cert is available or an error occurs.
+    let _ = stream.flush();
+    // Just-in-case: also do a tiny read to surface handshake errors.
+    let mut byte = [0u8; 1];
+    let _ = stream.read(&mut byte);
+
+    let der = conn
+        .peer_certificates()
+        .and_then(|chain| chain.first().cloned())
+        .ok_or_else(|| anyhow::anyhow!("server did not present any certificates"))?;
+
+    let pem = der_to_pem(der.as_ref());
+    let fingerprint = sha256_hex(der.as_ref());
+
+    let target = config_path
+        .parent()
+        .map(|p| p.join("server-pinned.crt"))
+        .ok_or_else(|| anyhow::anyhow!("config path has no parent dir"))?;
+    std::fs::create_dir_all(target.parent().expect("has parent"))?;
+    std::fs::write(&target, pem).with_context(|| format!("writing {}", target.display()))?;
+
+    Ok((target, fingerprint))
+}
+
+/// Pull the (host, port) out of `wss://host[:port]/path…`. Defaults
+/// the port to 443 only as a fallback; the typical clipboardwire URL
+/// includes the port explicitly.
+fn parse_wss_authority(url: &str) -> Result<(String, u16)> {
+    let after_scheme = url
+        .strip_prefix("wss://")
+        .ok_or_else(|| anyhow::anyhow!("server URL must start with wss:// to pin a certificate"))?;
+    let authority = after_scheme.split('/').next().unwrap_or("");
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((h, p)) => (
+            h.to_string(),
+            p.parse::<u16>().context("invalid port in server URL")?,
+        ),
+        None => (authority.to_string(), 443),
+    };
+    if host.is_empty() {
+        anyhow::bail!("server URL has no host");
+    }
+    Ok((host, port))
+}
+
+fn der_to_pem(der: &[u8]) -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let b64 = STANDARD.encode(der);
+    let mut out = String::with_capacity(b64.len() + 80);
+    out.push_str("-----BEGIN CERTIFICATE-----\n");
+    for chunk in b64.as_bytes().chunks(64) {
+        out.push_str(std::str::from_utf8(chunk).expect("base64 alphabet is ascii"));
+        out.push('\n');
+    }
+    out.push_str("-----END CERTIFICATE-----\n");
+    out
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 impl eframe::App for SettingsApp {
@@ -235,8 +358,21 @@ impl SettingsApp {
                     ui.end_row();
 
                     ui.label("TLS CA file (optional)");
-                    ui.text_edit_singleline(&mut self.form.tls_ca_file)
-                        .on_hover_text("PEM file with extra root CAs to trust");
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(&mut self.form.tls_ca_file)
+                            .on_hover_text("PEM file with extra root CAs to trust");
+                        if ui
+                            .button("Pin from server")
+                            .on_hover_text(
+                                "Connect to the server URL, fetch its certificate, save it next \
+                                 to the config file, and point this field at the saved PEM. \
+                                 You no longer need `Skip TLS verification` after pinning.",
+                            )
+                            .clicked()
+                        {
+                            self.pin_server_cert();
+                        }
+                    });
                     ui.end_row();
 
                     ui.label("Skip TLS verification");
@@ -468,6 +604,41 @@ mod tests {
             hub_tls_key_file: String::new(),
             last_error: None,
         }
+    }
+
+    #[test]
+    fn parse_wss_authority_handles_explicit_port() {
+        let (h, p) = parse_wss_authority("wss://nas.lan:8484/sync").unwrap();
+        assert_eq!(h, "nas.lan");
+        assert_eq!(p, 8484);
+    }
+
+    #[test]
+    fn parse_wss_authority_handles_no_path() {
+        let (h, p) = parse_wss_authority("wss://192.168.1.10:9999").unwrap();
+        assert_eq!(h, "192.168.1.10");
+        assert_eq!(p, 9999);
+    }
+
+    #[test]
+    fn parse_wss_authority_defaults_to_443() {
+        let (h, p) = parse_wss_authority("wss://example.com/sync").unwrap();
+        assert_eq!(h, "example.com");
+        assert_eq!(p, 443);
+    }
+
+    #[test]
+    fn parse_wss_authority_rejects_ws_scheme() {
+        assert!(parse_wss_authority("ws://nas.lan:8484/sync").is_err());
+    }
+
+    #[test]
+    fn der_to_pem_round_trips_via_rustls_pemfile() {
+        let der = [0u8, 1, 2, 3, 4, 5, 6, 7]; // not a real cert, just bytes
+        let pem = der_to_pem(&der);
+        assert!(pem.starts_with("-----BEGIN CERTIFICATE-----"));
+        assert!(pem.contains("AAECAwQFBgc="));
+        assert!(pem.trim_end().ends_with("-----END CERTIFICATE-----"));
     }
 
     #[test]

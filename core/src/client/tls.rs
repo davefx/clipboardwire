@@ -62,6 +62,18 @@ pub fn make_connector(config: &ClientConfig) -> Result<Connector> {
     Ok(Connector::Rustls(Arc::new(rustls_config)))
 }
 
+/// Build a sync rustls client config that accepts any server cert.
+/// Used by the Settings dialog's "Pin server cert" button to do a
+/// one-shot TLS handshake and capture whatever the hub is currently
+/// serving — *before* the user decides to trust it. Do not wire into
+/// the normal client transport.
+pub fn make_insecure_client_config() -> RustlsClientConfig {
+    RustlsClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(InsecureCertVerifier::new()))
+        .with_no_client_auth()
+}
+
 /// Skips every check. Use only behind a `tls_insecure = true` flag with an
 /// understood threat model.
 #[derive(Debug)]

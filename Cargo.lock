@@ -1012,6 +1012,7 @@ name = "clipboardwire"
 version = "0.3.3"
 dependencies = [
  "anyhow",
+ "base64",
  "clap",
  "clipboardwire-core",
  "dark-light",
@@ -1019,7 +1020,9 @@ dependencies = [
  "egui_kittest",
  "futures-util",
  "image",
+ "rustls",
  "serde",
+ "sha2",
  "tao",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
