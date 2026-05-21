@@ -82,6 +82,97 @@ jobs:
           cp target/aarch64-apple-darwin/release/clipboardwire dist/clipboardwire-macos-aarch64
           cp target/x86_64-apple-darwin/release/clipboardwire dist/clipboardwire-macos-x86_64
 
+      - name: Build .icns from the bundled PNG
+        run: |
+          set -euo pipefail
+          ICONSET=clipboardwire.iconset
+          mkdir -p "$ICONSET"
+          sips -z 16 16   assets/icon-256.png --out "$ICONSET/icon_16x16.png"
+          sips -z 32 32   assets/icon-256.png --out "$ICONSET/icon_16x16@2x.png"
+          sips -z 32 32   assets/icon-256.png --out "$ICONSET/icon_32x32.png"
+          sips -z 64 64   assets/icon-256.png --out "$ICONSET/icon_32x32@2x.png"
+          sips -z 128 128 assets/icon-256.png --out "$ICONSET/icon_128x128.png"
+          sips -z 256 256 assets/icon-256.png --out "$ICONSET/icon_128x128@2x.png"
+          sips -z 256 256 assets/icon-256.png --out "$ICONSET/icon_256x256.png"
+          # icon-256.png is only 256 px so the highest 512px slot reuses it; macOS
+          # is happy with that for an app this small.
+          sips -z 512 512 assets/icon-256.png --out "$ICONSET/icon_256x256@2x.png"
+          mkdir -p build
+          iconutil -c icns "$ICONSET" -o build/clipboardwire.icns
+
+      - name: Assemble clipboardwire.app
+        run: |
+          set -euo pipefail
+          # Strip the leading "v" from the tag (vX.Y.Z → X.Y.Z) for the
+          # CFBundleVersion fields.
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Build the bundle in a scratch dir so dist/ stays a flat
+          # list of upload artifacts (softprops/action-gh-release's
+          # `dist/*` glob doesn't deal with directories well).
+          mkdir -p build
+          APP=build/clipboardwire.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp dist/clipboardwire-macos-universal "$APP/Contents/MacOS/clipboardwire"
+          chmod +x "$APP/Contents/MacOS/clipboardwire"
+          cp build/clipboardwire.icns "$APP/Contents/Resources/clipboardwire.icns"
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleIdentifier</key>
+            <string>com.davefx.clipboardwire</string>
+            <key>CFBundleName</key>
+            <string>clipboardwire</string>
+            <key>CFBundleDisplayName</key>
+            <string>clipboardwire</string>
+            <key>CFBundleVersion</key>
+            <string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${VERSION}</string>
+            <key>CFBundleExecutable</key>
+            <string>clipboardwire</string>
+            <key>CFBundleIconFile</key>
+            <string>clipboardwire.icns</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>11.0</string>
+            <!-- clipboardwire lives in the menu bar; it has no main
+                 window of its own, so we hide it from the Dock and the
+                 app switcher. -->
+            <key>LSUIElement</key>
+            <true/>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint "$APP/Contents/Info.plist"
+
+      - name: Build .dmg
+        run: |
+          set -euo pipefail
+          # Stage just the .app + an /Applications symlink in a scratch
+          # folder so the DMG window opens with one obvious drag-target.
+          STAGE=build/dmg-stage
+          mkdir -p "$STAGE"
+          cp -R build/clipboardwire.app "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create \
+            -volname clipboardwire \
+            -srcfolder "$STAGE" \
+            -ov -format UDZO \
+            dist/clipboardwire-macos-universal.dmg
+
+      - name: Stage the .app archive (.tar.gz) as an upload-friendly artifact
+        run: |
+          set -euo pipefail
+          # softprops/action-gh-release can't preserve directory
+          # structure, so the raw .app gets tarred. Users who prefer
+          # the bundle over the DMG can `tar -xzf` it into /Applications.
+          tar -C build -czf dist/clipboardwire-macos.app.tar.gz clipboardwire.app
+
       - name: Upload to GitHub release
         uses: softprops/action-gh-release@v2
         with:

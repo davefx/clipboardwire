@@ -87,19 +87,29 @@ shortcut, and registers a `HKCU\Run` entry so the tray comes up at login.
 
 ### macOS
 
-A universal binary (Apple Silicon + Intel) is attached to each release.
+Download `clipboardwire-macos-universal.dmg` from the
+[latest release](https://github.com/davefx/clipboardwire/releases/latest)
+and double-click. The DMG opens a window with the `clipboardwire.app`
+bundle next to an `Applications` shortcut — drag the app over.
 
 ```sh
-curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-macos-universal
-chmod +x clipboardwire-macos-universal
-sudo mv clipboardwire-macos-universal /usr/local/bin/clipboardwire
-clipboardwire
+# Alternative: command line
+curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-macos-universal.dmg
+hdiutil attach clipboardwire-macos-universal.dmg
+cp -R "/Volumes/clipboardwire/clipboardwire.app" /Applications/
+hdiutil detach "/Volumes/clipboardwire"
+open /Applications/clipboardwire.app
 ```
 
-macOS will quarantine the unsigned binary. The first launch surfaces a
-"cannot verify developer" warning — open *System Settings → Privacy &
-Security*, scroll to the bottom, and click *Open Anyway*. A `.app` /
-`.dmg` bundle + a Homebrew tap are on the v0.4 roadmap.
+The binary is unsigned, so the first launch shows a "cannot verify
+developer" warning. Open *System Settings → Privacy & Security*,
+scroll to the bottom, and click *Open Anyway*.
+
+clipboardwire lives in the menu bar (LSUIElement) — no dock icon. A
+Homebrew tap is on the v0.5 roadmap.
+
+Prefer the raw universal binary? Replace the `.dmg` URL above with
+`clipboardwire-macos-universal` (no extension) and `chmod +x` it.
 
 ### Cargo (any platform with Rust 1.89+)
 
