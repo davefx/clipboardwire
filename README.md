@@ -6,7 +6,7 @@
 [![Release](https://img.shields.io/github/v/release/davefx/clipboardwire?sort=semver)](https://github.com/davefx/clipboardwire/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/license-GPL%20v3%2B-blue.svg)](LICENSE)
 
-Copy on one machine, paste on another. Text and images. No cloud account, no
+Copy on one machine, paste on another. Text, images and files. No cloud account, no
 SaaS, no JVM — just a 7 MiB static binary that runs as a tray icon and shuttles
 clipboard contents between your trusted devices over an encrypted WebSocket.
 
