@@ -14,6 +14,7 @@ use clipboardwire_core::protocol::{
     ClipFrame, Frame, WelcomeFrame, PROTOCOL_VERSION, TEXT_CONTENT_TYPE,
 };
 use clipboardwire_core::server::auth::basic_header_value;
+use clipboardwire_core::server::hub::HubStatsSink;
 use clipboardwire_core::server::{build_app, ServerConfig};
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
@@ -34,6 +35,10 @@ struct TestServer {
 }
 
 async fn start_server(max_conns: usize) -> TestServer {
+    start_server_with_stats(max_conns, None).await
+}
+
+async fn start_server_with_stats(max_conns: usize, stats: Option<HubStatsSink>) -> TestServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let cfg = ServerConfig {
@@ -46,7 +51,7 @@ async fn start_server(max_conns: usize) -> TestServer {
         tls_key_file: None,
         tls_disabled: true,
         state_dir: None,
-        stats: None,
+        stats,
     };
     let (app, _hub_join) = build_app(cfg);
     let task = tokio::spawn(async move {
@@ -232,4 +237,49 @@ async fn connection_beyond_capacity_is_rejected_with_503() {
     }
 
     a.close(None).await.ok();
+}
+
+#[tokio::test]
+async fn hub_stats_sink_tracks_connections_through_real_websockets() {
+    let stats = HubStatsSink::new();
+    assert_eq!(stats.current(), 0);
+    let srv = start_server_with_stats(8, Some(stats.clone())).await;
+
+    // The poller pattern used by the tray reads the sink without
+    // holding any reference to the hub task — this test exercises
+    // the same code path: open a real WebSocket, wait for welcome
+    // (which the server only sends after registering us), check
+    // the sink reflects us.
+    let (mut a, _id_a) = connect_and_welcome(srv.addr, USER, PW).await;
+    await_count(&stats, 1).await;
+
+    let (mut b, _id_b) = connect_and_welcome(srv.addr, USER, PW).await;
+    await_count(&stats, 2).await;
+
+    a.close(None).await.ok();
+    drop(a);
+    await_count(&stats, 1).await;
+
+    b.close(None).await.ok();
+    drop(b);
+    await_count(&stats, 0).await;
+}
+
+/// Spin on the sink until it reads `expected`, with a hard deadline.
+/// Register / deregister round-trips through the hub task's inbox so
+/// the count doesn't update synchronously with the WebSocket
+/// handshake; a polite poll keeps the test deterministic without an
+/// arbitrary sleep.
+async fn await_count(stats: &HubStatsSink, expected: usize) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        if stats.current() == expected {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!(
+        "hub stats sink never reached {expected}; last seen {}",
+        stats.current()
+    );
 }
