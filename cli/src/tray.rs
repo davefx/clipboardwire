@@ -132,9 +132,14 @@ pub fn run(
     let proxy = event_loop.create_proxy();
 
     let menu = Menu::new();
-    // The top "Status: …" line is informational (always disabled) — it
-    // reflects whatever the client transport last reported via watch.
+    // The top lines are informational (always disabled) — they show
+    // connection status, server URL, and hub peer count. Tooltips are
+    // unreliable on Linux (libayatana-appindicator doesn't support
+    // them), so we surface everything in the menu itself.
     let status_item = MenuItem::new(status_label_for(None, false), false, None);
+    let server_item = MenuItem::new(server_label(initial_config.as_ref()), false, None);
+    let hub_info_item = MenuItem::new("", false, None);
+    hub_info_item.set_enabled(false);
     let sep0 = PredefinedMenuItem::separator();
     let edit_item = MenuItem::new("Edit config…", true, None);
     let reload_item = MenuItem::new("Reload config", true, None);
@@ -145,6 +150,8 @@ pub fn run(
     let sep2 = PredefinedMenuItem::separator();
     let quit_item = MenuItem::new("Quit clipboardwire", true, None);
     menu.append(&status_item)?;
+    menu.append(&server_item)?;
+    menu.append(&hub_info_item)?;
     menu.append(&sep0)?;
     menu.append(&edit_item)?;
     menu.append(&reload_item)?;
@@ -229,6 +236,8 @@ pub fn run(
     apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
     update_status_item(&status_item, &state);
+    update_server_item(&server_item, &state);
+    update_hub_info_item(&hub_info_item, &state);
     refresh_icon(&tray, theme, &state);
 
     // First-run / no-valid-config flow: pop the settings GUI so the
@@ -274,6 +283,8 @@ pub fn run(
                     apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
                     update_status_item(&status_item, &state);
+                    update_server_item(&server_item, &state);
+                    update_hub_info_item(&hub_info_item, &state);
                     refresh_icon(&tray, theme, &state);
                 } else if menu_event.id == start_hub_id {
                     if let Err(e) =
@@ -283,11 +294,13 @@ pub fn run(
                     }
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
                     update_status_item(&status_item, &state);
+                    update_hub_info_item(&hub_info_item, &state);
                     refresh_tooltip(&tray, &state, &config_path);
                     refresh_icon(&tray, theme, &state);
                 } else if menu_event.id == stop_hub_id {
                     stop_embedded_hub(&mut state);
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
+                    update_hub_info_item(&hub_info_item, &state);
                     refresh_icon(&tray, theme, &state);
                 } else if menu_event.id == restart_hub_id {
                     stop_embedded_hub(&mut state);
@@ -298,6 +311,7 @@ pub fn run(
                     }
                     update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
                     update_status_item(&status_item, &state);
+                    update_hub_info_item(&hub_info_item, &state);
                     refresh_tooltip(&tray, &state, &config_path);
                     refresh_icon(&tray, theme, &state);
                 } else {
@@ -327,6 +341,7 @@ pub fn run(
                 update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
             }
             Event::UserEvent(UserEvent::HubPeerCountChanged) => {
+                update_hub_info_item(&hub_info_item, &state);
                 refresh_tooltip(&tray, &state, &config_path);
             }
             Event::UserEvent(UserEvent::ThemeChanged(new_theme)) => {
@@ -339,6 +354,7 @@ pub fn run(
             {
                 state.client_status = Some(status);
                 update_status_item(&status_item, &state);
+                update_server_item(&server_item, &state);
                 refresh_tooltip(&tray, &state, &config_path);
                 refresh_icon(&tray, theme, &state);
             }
@@ -350,6 +366,8 @@ pub fn run(
                 apply_loaded_config(runtime.handle(), &proxy, &mut state, &config_path, &tray);
                 update_hub_menu(&state, &start_hub_item, &stop_hub_item, &restart_hub_item);
                 update_status_item(&status_item, &state);
+                update_server_item(&server_item, &state);
+                update_hub_info_item(&hub_info_item, &state);
                 refresh_tooltip(&tray, &state, &config_path);
                 refresh_icon(&tray, theme, &state);
             }
@@ -622,6 +640,49 @@ fn update_status_item(item: &MenuItem, state: &State) {
     ));
 }
 
+/// Refresh the disabled server-URL menu item. Shows the server URL when
+/// a config is loaded, hidden otherwise.
+fn update_server_item(item: &MenuItem, state: &State) {
+    item.set_text(server_label(state.cfg.as_ref()));
+}
+
+/// Render the server-URL label for the informational menu item.
+fn server_label(cfg: Option<&ClientConfig>) -> String {
+    match cfg {
+        Some(c) => c.server.clone(),
+        None => String::new(),
+    }
+}
+
+/// Refresh the disabled hub-info menu item. Shows the connected-peer
+/// count when the hub is running, empty otherwise. Tooltips are
+/// unreliable on Linux, so this surfaces the same info in the menu.
+fn update_hub_info_item(item: &MenuItem, state: &State) {
+    let text = hub_info_label(state);
+    // Hide the item when there's nothing to show (no hub running).
+    if text.is_empty() {
+        item.set_text("");
+    } else {
+        item.set_text(text);
+    }
+}
+
+/// Render the hub-info label for the menu item.
+fn hub_info_label(state: &State) -> String {
+    if let Some(stats) = &state.hub_stats {
+        let n = stats.current();
+        match n {
+            0 => "Hub: 0 clients connected".to_string(),
+            1 => "Hub: 1 client connected".to_string(),
+            n => format!("Hub: {n} clients connected"),
+        }
+    } else if state.embedded_hub.is_some() {
+        "Hub: running".to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// Hot-swap the tray icon with one whose colored status dot matches
 /// the current state. Called from every place that bumps status.
 fn refresh_icon(tray: &TrayIcon, theme: Option<dark_light::Mode>, state: &State) {
@@ -807,7 +868,7 @@ fn build_icon(
 /// bottom-right of the tray icon. Drawn directly into the RGBA buffer
 /// to avoid pulling in an extra drawing crate.
 fn draw_status_dot(rgba: &mut image::RgbaImage, width: u32, height: u32, color: [u8; 4]) {
-    let r = (width.min(height) as i32) * 7 / 20; // ≈ 35% of the icon side
+    let r = (width.min(height) as i32) * 11 / 50; // ≈ 22% of the icon side
     let cx = width as i32 - r - 1;
     let cy = height as i32 - r - 1;
     let halo_r = r + 1;

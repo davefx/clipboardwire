@@ -4,6 +4,18 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.4.3] — 2026-05-25
+
+### Changed
+- **Tray menu now shows server URL and hub peer count** as disabled
+  info lines below the status item. Linux tray icons (libayatana-
+  appindicator) don't support tooltips, so the server address and
+  hub connection count are now always visible in the right-click
+  menu. The tooltip is still maintained for platforms that support it.
+- **Smaller status-dot overlay on the tray icon.** Reduced from ~35%
+  to ~22% of the icon side so the actual icon artwork is more
+  visible while the colored connection-status dot still reads clearly.
+
 ## [0.4.2] — 2026-05-24
 
 ### Added
@@ -220,6 +232,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.4.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.3
 [0.4.2]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.2
 [0.4.1]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.1
 [0.4.0]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.0
