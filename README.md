@@ -1,6 +1,6 @@
 # clipboardwire
 
-> Cross-platform clipboard sync over WebSocket. One small Rust binary. Runs on Linux + Windows. LAN/VPN-first.
+> Cross-platform clipboard sync over WebSocket. One small Rust binary. Runs on Linux + Windows + MacOS. LAN/VPN-first.
 
 [![CI](https://github.com/davefx/clipboardwire/actions/workflows/ci.yml/badge.svg)](https://github.com/davefx/clipboardwire/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/davefx/clipboardwire?sort=semver)](https://github.com/davefx/clipboardwire/releases/latest)
