@@ -4,6 +4,14 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.4.4] — 2026-05-26
+
+### Changed
+- **Hub logs now include peer IP address.** Every WebSocket connection
+  log line (opened, closed, errors) includes the client's IP:port in
+  the tracing span via axum's `ConnectInfo` extractor, making it easy
+  to identify which device is connecting or disconnecting.
+
 ## [0.4.3] — 2026-05-25
 
 ### Changed
@@ -232,6 +240,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.4.4]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.4
 [0.4.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.3
 [0.4.2]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.2
 [0.4.1]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.1

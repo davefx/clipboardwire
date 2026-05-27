@@ -51,7 +51,11 @@ async fn supervisor_round_trip_through_real_hub() {
     let addr = listener.local_addr().unwrap();
     let (app, _hub_join) = build_app(server_cfg(addr));
     let _server_task = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
     // -- Client A: we inject a local clipboard change via a_events_tx --
@@ -97,7 +101,11 @@ async fn image_round_trip_through_real_hub() {
     let addr = listener.local_addr().unwrap();
     let (app, _hub_join) = build_app(server_cfg(addr));
     let _server_task = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
     // Client A publishes the image.
@@ -154,7 +162,11 @@ async fn late_joiner_supervisor_applies_cached_clip() {
     let addr = listener.local_addr().unwrap();
     let (app, _hub_join) = build_app(server_cfg(addr));
     let _server_task = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
     // A publishes first.

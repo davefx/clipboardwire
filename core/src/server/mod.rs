@@ -71,10 +71,13 @@ pub async fn serve(
 ) -> Result<()> {
     if config.tls_disabled {
         let (app, _hub_join) = build_app(config);
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown)
-            .await
-            .context("axum::serve")?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown)
+        .await
+        .context("axum::serve")?;
         return Ok(());
     }
 
@@ -146,7 +149,7 @@ async fn serve_tls(
     let (app, _hub_join) = build_app(config);
     axum_server::from_tcp_rustls(std_listener, tls)
         .handle(handle)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .await
         .context("axum_server::serve (tls)")?;
     Ok(())

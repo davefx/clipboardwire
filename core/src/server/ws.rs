@@ -15,11 +15,12 @@
 //! 6. On either task exiting, we deregister and the semaphore permit is
 //!    dropped, freeing capacity.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{ConnectInfo, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::sink::SinkExt;
@@ -53,6 +54,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(45);
 pub async fn sync_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
 ) -> Response {
     // 1. Auth.
@@ -86,14 +88,15 @@ pub async fn sync_handler(
     let max_frame = state.config.max_frame_bytes;
     ws.max_message_size(max_frame)
         .max_frame_size(max_frame)
-        .on_upgrade(move |socket| handle_socket(socket, state, permit))
+        .on_upgrade(move |socket| handle_socket(socket, state, permit, peer))
 }
 
-#[instrument(skip_all, fields(client = tracing::field::Empty))]
+#[instrument(skip_all, fields(client = tracing::field::Empty, peer = %peer))]
 async fn handle_socket(
     socket: WebSocket,
     state: AppState,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    peer: SocketAddr,
 ) {
     let client_id = Uuid::new_v4();
     tracing::Span::current().record("client", tracing::field::display(client_id));

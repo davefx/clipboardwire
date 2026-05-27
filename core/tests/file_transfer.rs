@@ -86,7 +86,11 @@ async fn file_sent_by_one_client_arrives_intact_at_the_other() {
     let addr = listener.local_addr().unwrap();
     let (app, _hub_join) = build_app(server_cfg(addr));
     let _server_task = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
     // -- Receiver: subscribes to inbound files and pipes them into a
@@ -186,7 +190,11 @@ async fn multi_chunk_file_round_trips_intact() {
     cfg.max_frame_bytes = 16 * 1024 * 1024;
     let (app, _hub_join) = build_app(cfg);
     let _server_task = tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await;
     });
 
     let receiver_save_dir = unique_tmp_dir("multi-recv");
