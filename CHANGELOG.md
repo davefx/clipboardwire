@@ -4,6 +4,18 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.4.6] — 2026-05-27
+
+### Fixed
+- **Windows client no longer disconnects every ~60 seconds.** The
+  client was not sending WebSocket pings, relying entirely on the
+  server's pings and the auto-pong response. On Windows, power-managed
+  network adapters can delay or drop a pong just long enough to trip
+  the server's read timeout. Fixed by adding client-side pings every
+  30 s (matching the server) and raising the server's read timeout
+  from 45 s to 90 s so a single missed pong doesn't kill the
+  connection.
+
 ## [0.4.5] — 2026-05-27
 
 ### Added
@@ -253,6 +265,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.4.6]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.6
 [0.4.5]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.5
 [0.4.4]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.4
 [0.4.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.3

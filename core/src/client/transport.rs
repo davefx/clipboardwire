@@ -31,6 +31,7 @@ use super::tls;
 const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const RESET_AFTER_STABLE: Duration = Duration::from_secs(30);
+const PING_INTERVAL: Duration = Duration::from_secs(30);
 const INBOUND_BUF: usize = 32;
 const OUTBOUND_BUF: usize = 8;
 /// File chunks are bigger than clips and naturally back-pressured by
@@ -286,6 +287,9 @@ async fn connect_and_serve(
         let _ = inbound_tx.send(clip).await;
     }
 
+    let mut ping_timer = tokio::time::interval(PING_INTERVAL);
+    ping_timer.tick().await; // skip the immediate first tick
+
     loop {
         tokio::select! {
             outbound = outbound_rx.recv() => {
@@ -364,6 +368,12 @@ async fn connect_and_serve(
                         return Ok(());
                     }
                     _ => {}
+                }
+            }
+            _ = ping_timer.tick() => {
+                if let Err(e) = sink.send(Message::Ping(Default::default())).await {
+                    warn!(error = %e, "ping send failed");
+                    return Err(e.into());
                 }
             }
         }

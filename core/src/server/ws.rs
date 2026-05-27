@@ -47,7 +47,7 @@ pub struct AppState {
 }
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
-const READ_TIMEOUT: Duration = Duration::from_secs(45);
+const READ_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Axum handler for `GET /sync`. Returns the upgrade response on success, or
 /// 401 / 503 on failure.
