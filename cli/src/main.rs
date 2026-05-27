@@ -110,7 +110,11 @@ fn init_tracing() {
         tracing_subscriber::registry()
             .with(filter)
             .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-            .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(non_blocking)
+                    .with_ansi(false),
+            )
             .init();
 
         install_panic_hook(Some(log_dir));
