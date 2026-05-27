@@ -4,6 +4,19 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.4.5] — 2026-05-27
+
+### Added
+- **Persistent file logging.** All tracing output now goes to both
+  stderr and a daily-rotating log file under the config directory
+  (`~/.config/clipboardwire/clipboardwire.log.YYYY-MM-DD` on Linux).
+  If the process disappears unexpectedly, the log file shows what
+  happened last.
+- **Panic hook with crash file.** Panics are caught by a custom hook
+  that writes the panic message plus a full backtrace to
+  `~/.config/clipboardwire/crash.log` before aborting. This survives
+  even if the tracing layer hasn't flushed yet.
+
 ## [0.4.4] — 2026-05-26
 
 ### Changed
@@ -240,6 +253,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.4.5]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.5
 [0.4.4]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.4
 [0.4.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.3
 [0.4.2]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.2

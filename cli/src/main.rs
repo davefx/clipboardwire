@@ -96,12 +96,56 @@ fn main() -> Result<()> {
 }
 
 fn init_tracing() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "clipboardwire=info,clipboardwire_core=info".into()),
-        )
-        .init();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "clipboardwire=info,clipboardwire_core=info".into());
+
+    if let Some(log_dir) = log_dir() {
+        let file_appender = tracing_appender::rolling::daily(&log_dir, "clipboardwire.log");
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        // Leak the guard so the writer lives for the whole process.
+        std::mem::forget(_guard);
+
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(tracing_subscriber::fmt::layer().with_writer(non_blocking).with_ansi(false))
+            .init();
+
+        install_panic_hook(Some(log_dir));
+    } else {
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+        install_panic_hook(None);
+    }
+}
+
+fn log_dir() -> Option<PathBuf> {
+    ClientConfig::default_path()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+}
+
+fn install_panic_hook(log_dir: Option<PathBuf>) {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = format!("PANIC: {info}");
+        // Surface via tracing so it reaches the log file.
+        tracing::error!("{msg}");
+        // Also write a standalone crash file as a belt-and-suspenders
+        // measure in case the tracing layer hasn't flushed yet.
+        if let Some(dir) = &log_dir {
+            let crash_path = dir.join("crash.log");
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            let body = format!("{timestamp} {msg}\n{backtrace}\n");
+            let _ = std::fs::write(&crash_path, body);
+        }
+        default_hook(info);
+    }));
 }
 
 /// Best-effort: re-attach to the parent console so `cargo run`, PowerShell,
