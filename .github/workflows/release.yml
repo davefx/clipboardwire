@@ -11,8 +11,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  create-release:
+    name: Create release with changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Extract the section between "## [$VERSION]" and the next "## [".
+          BODY=$(awk "/^## \\[$VERSION\\]/{found=1; next} /^## \\[/{if(found) exit} found" CHANGELOG.md)
+          # Write to a file to preserve newlines in the GH Actions output.
+          echo "$BODY" > /tmp/release-notes.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/release-notes.md
+
   linux:
     name: Linux artifacts (.deb, .rpm, raw binary)
+    needs: create-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +76,7 @@ jobs:
 
   macos:
     name: macOS artifacts (universal binary)
+    needs: create-release
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -181,6 +204,7 @@ jobs:
 
   windows:
     name: Windows artifacts (.exe and .msi)
+    needs: create-release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
