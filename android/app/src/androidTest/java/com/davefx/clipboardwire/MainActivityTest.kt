@@ -26,22 +26,26 @@ class MainActivityTest {
     }
 
     @Test
-    fun can_type_into_server_url_field() {
-        composeRule.onNodeWithText("Server URL").performTextInput("wss://test:8484/sync")
-        composeRule.onNodeWithText("wss://test:8484/sync").assertIsDisplayed()
+    fun server_url_field_accepts_input() {
+        val field = composeRule.onNodeWithText("Server URL")
+        field.performClick()
+        field.performTextClearance()
+        field.performTextInput("wss://example:8484/sync")
+        field.assertTextContains("wss://example:8484/sync")
     }
 
     @Test
-    fun can_type_into_username_field() {
-        composeRule.onNodeWithText("Username").performTextInput("alice")
-        composeRule.onNodeWithText("alice").assertIsDisplayed()
+    fun username_field_accepts_input() {
+        val field = composeRule.onNodeWithText("Username")
+        field.performClick()
+        field.performTextClearance()
+        field.performTextInput("bob")
+        field.assertTextContains("bob")
     }
 
     @Test
     fun can_toggle_tls_checkbox() {
-        val checkbox = composeRule.onNodeWithText("Skip TLS verification (LAN/VPN only)")
-        checkbox.assertIsDisplayed()
-        // Toggle the checkbox by clicking it
-        checkbox.performClick()
+        composeRule.onNodeWithText("Skip TLS verification (LAN/VPN only)")
+            .performClick()
     }
 }

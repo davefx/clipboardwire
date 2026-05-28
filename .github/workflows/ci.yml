@@ -90,3 +90,29 @@ jobs:
       - name: File-clipboard roundtrip — macOS
         if: matrix.os == 'macos-latest'
         run: cargo test --workspace --test clipboard_files_roundtrip -- --ignored --nocapture
+
+  android:
+    name: Android tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Android JVM unit tests
+        working-directory: android
+        run: ./gradlew testDebugUnitTest
+
+      - name: Android instrumented tests (emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          working-directory: android
+          script: ./gradlew connectedDebugAndroidTest
