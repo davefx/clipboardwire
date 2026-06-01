@@ -4,6 +4,20 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.5.0] — 2026-06-01
+
+### Added
+- **Android client.** Native Kotlin + Jetpack Compose app with OkHttp
+  WebSocket, foreground service for background sync, DataStore
+  preferences, boot-start receiver, and exponential-backoff reconnect.
+  The APK is now attached to every GitHub release for sideloading.
+- **CI: Android test jobs.** JVM unit tests and emulator-based
+  instrumented tests run on every push alongside the Rust test matrix.
+- **Release workflow builds the Android APK** and attaches it to the
+  GitHub release automatically.
+- **`scripts/release.sh` bumps Android version** — versionName and
+  auto-incremented versionCode are now updated alongside Cargo.toml.
+
 ## [0.4.6] — 2026-05-27
 
 ### Fixed
@@ -265,6 +279,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.5.0]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.0
 [0.4.6]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.6
 [0.4.5]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.5
 [0.4.4]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.4

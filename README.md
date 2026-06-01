@@ -72,21 +72,21 @@ single-user / personal-use deployment on a LAN or VPN.
 ### Linux (deb)
 
 ```sh
-curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire_0.4.6-1_amd64.deb
-sudo apt install ./clipboardwire_0.4.6-1_amd64.deb
+curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire_0.5.0-1_amd64.deb
+sudo apt install ./clipboardwire_0.5.0-1_amd64.deb
 clipboardwire   # opens the tray; first run pops the Settings dialog
 ```
 
 ### Linux (rpm)
 
 ```sh
-curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-0.4.6-1.x86_64.rpm
-sudo dnf install ./clipboardwire-0.4.6-1.x86_64.rpm
+curl -LO https://github.com/davefx/clipboardwire/releases/latest/download/clipboardwire-0.5.0-1.x86_64.rpm
+sudo dnf install ./clipboardwire-0.5.0-1.x86_64.rpm
 ```
 
 ### Windows
 
-Download `clipboardwire-0.4.6-x86_64.msi` from the
+Download `clipboardwire-0.5.0-x86_64.msi` from the
 [latest release](https://github.com/davefx/clipboardwire/releases/latest)
 and double-click it. The installer creates a Start Menu shortcut, a Desktop
 shortcut, and registers a `HKCU\Run` entry so the tray comes up at login.
@@ -259,7 +259,7 @@ xvfb-run -a cargo test --workspace -- --ignored        # tray + DBus + UIA
 
 ## Status & roadmap
 
-Currently shipping: **v0.4.6** — see [CHANGELOG.md](CHANGELOG.md).
+Currently shipping: **v0.5.0** — see [CHANGELOG.md](CHANGELOG.md).
 
 v0.4 shipped the big v0.4 roadmap items: file sync via the clipboard
 (Linux X11, Windows CF_HDROP, macOS NSPasteboardTypeFileURL), tray

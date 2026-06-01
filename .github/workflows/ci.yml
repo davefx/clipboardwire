@@ -132,3 +132,56 @@ jobs:
           disable-animations: true
           working-directory: android
           script: ./gradlew connectedDebugAndroidTest
+
+  android-server-integration:
+    name: Android ↔ Rust server integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build deps
+        run: sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+
+      - name: Build clipboardwire server
+        run: cargo build --release -p clipboardwire
+
+      - name: Start hub in background
+        env:
+          CLIPBOARDWIRE_BIND: 0.0.0.0:18484
+          CLIPBOARDWIRE_USER: testuser
+          CLIPBOARDWIRE_PASSWORD: testpass
+          CLIPBOARDWIRE_TLS_DISABLE: "1"
+        run: |
+          nohup target/release/clipboardwire serve > /tmp/hub.log 2>&1 &
+          echo $! > /tmp/hub.pid
+          sleep 2
+          # Verify it's listening
+          ss -tlnp | grep 18484
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Integration tests (emulator → real server)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect
+          disable-animations: true
+          working-directory: android
+          script: >-
+            ./gradlew connectedDebugAndroidTest
+            -Pandroid.testInstrumentationRunnerArguments.testServerUrl=ws://10.0.2.2:18484/sync
