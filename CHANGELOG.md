@@ -11,12 +11,25 @@ follows [Semantic Versioning](https://semver.org).
   WebSocket, foreground service for background sync, DataStore
   preferences, boot-start receiver, and exponential-backoff reconnect.
   The APK is now attached to every GitHub release for sideloading.
-- **CI: Android test jobs.** JVM unit tests and emulator-based
-  instrumented tests run on every push alongside the Rust test matrix.
+- **Android ↔ Rust server integration tests.** A new CI job builds the
+  Rust hub, starts it, spins up an Android emulator, and verifies the
+  full clip relay flow end-to-end (welcome, multi-client fan-out,
+  auth rejection). 35 Android tests total (23 JVM + 12 instrumented).
 - **Release workflow builds the Android APK** and attaches it to the
   GitHub release automatically.
+- **Release notes auto-populated from CHANGELOG.md** — the release
+  workflow extracts the matching version section and fills the GitHub
+  release body.
 - **`scripts/release.sh` bumps Android version** — versionName and
   auto-incremented versionCode are now updated alongside Cargo.toml.
+
+### Fixed
+- **Android cleartext ws:// connections now work to any IP.** The
+  previous network security config used `<domain>` entries for private
+  IP ranges, but Android treats those as literal hostnames — so
+  `ws://192.168.1.50` would silently fail. Switched to
+  `base-config cleartextTrafficPermitted=true` since this is a
+  LAN-first tool where users configure arbitrary IPs.
 
 ## [0.4.6] — 2026-05-27
 
