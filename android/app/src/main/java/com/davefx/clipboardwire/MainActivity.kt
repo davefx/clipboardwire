@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
                         saved = true
                         ClipboardSyncService.stop(this@MainActivity)
                         if (server.isNotBlank() && user.isNotBlank()) {
+                            kotlinx.coroutines.delay(500)
                             ClipboardSyncService.start(this@MainActivity)
                         }
                     }

@@ -6,16 +6,20 @@ import android.content.*
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.InetAddress
 import java.util.concurrent.atomic.AtomicReference
 
 class ClipboardSyncService : Service(), WebSocketHandler.Listener {
@@ -31,6 +35,10 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     private var backoff = INITIAL_BACKOFF_MS
     private var connectedSince: Long = 0
     private var serverLabel: String = ""
+    @Volatile private var stopping = false
+    private var serverIsPrivate = false
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private val networkReady = kotlinx.coroutines.channels.Channel<Unit>(1)
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         onLocalClipboardChanged()
@@ -39,12 +47,14 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     override fun onCreate() {
         super.onCreate()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, buildNotification("Starting…", null),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID, buildNotification("Starting…", null),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
-            else 0
-        )
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification("Starting…", null))
+        }
         clipboardManager.addPrimaryClipChangedListener(clipListener)
         scope.launch { connectLoop() }
     }
@@ -59,7 +69,18 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             .removePrefix("wss://").removePrefix("ws://")
             .removeSuffix("/sync")
 
+        serverIsPrivate = isPrivateAddress(serverLabel.substringBefore(":"))
+        if (serverIsPrivate) registerNetworkCallback()
+
         while (isActive()) {
+            if (serverIsPrivate && !hasWifi()) {
+                updateNotification("Paused", "Waiting for WiFi — $serverLabel is a LAN address")
+                Log.i(TAG, "server is on a private IP, waiting for WiFi")
+                networkReady.receiveCatching()
+                if (!isActive()) return
+                backoff = INITIAL_BACKOFF_MS
+            }
+
             updateNotification("Connecting…", serverLabel)
             wsHandler?.close()
             wsHandler = WebSocketHandler(
@@ -71,7 +92,6 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             )
             wsHandler!!.connect()
 
-            // Wait until disconnected (the callbacks drive state)
             suspendCancellableCoroutine<Unit> { cont ->
                 disconnectCont = cont
             }
@@ -81,6 +101,45 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             delay(backoff)
             backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
         }
+    }
+
+    private fun isPrivateAddress(host: String): Boolean {
+        return try {
+            val addr = InetAddress.getByName(host)
+            addr.isSiteLocalAddress || addr.isLoopbackAddress || addr.isLinkLocalAddress
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun hasWifi(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun registerNetworkCallback() {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                Log.i(TAG, "WiFi available, resuming")
+                networkReady.trySend(Unit)
+            }
+        }
+        networkCallback = cb
+        cm.registerNetworkCallback(request, cb)
+    }
+
+    private fun unregisterNetworkCallback() {
+        networkCallback?.let {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            try { cm.unregisterNetworkCallback(it) } catch (_: Exception) {}
+        }
+        networkCallback = null
     }
 
     @Volatile
@@ -209,8 +268,21 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     }
 
     private fun updateNotification(status: String, subtitle: String? = null) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm?.notify(NOTIFICATION_ID, buildNotification(status, subtitle))
+        if (stopping) return
+        val notification = buildNotification(status, subtitle)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startForeground(
+                    NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+                )
+            } catch (_: Exception) {
+                // Service may already be stopping
+            }
+        } else {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm?.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun ensureNotificationChannel() {
@@ -234,6 +306,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            stopping = true
             scope.cancel()
             wsHandler?.close()
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -244,6 +317,9 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     }
 
     override fun onDestroy() {
+        stopping = true
+        unregisterNetworkCallback()
+        networkReady.close()
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         scope.cancel()
         wsHandler?.close()

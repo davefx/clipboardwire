@@ -24,6 +24,7 @@ class WebSocketHandler(
 
     fun connect() {
         val builder = OkHttpClient.Builder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .pingInterval(30, TimeUnit.SECONDS)
             .readTimeout(90, TimeUnit.SECONDS)
 
@@ -57,7 +58,7 @@ class WebSocketHandler(
 
         webSocket = client!!.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket opened")
+                Log.i(TAG, "WebSocket opened, protocol=${response.protocol}")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -76,7 +77,8 @@ class WebSocketHandler(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.w(TAG, "WebSocket failure: ${t.message}")
+                val body = try { response?.body?.string()?.take(200) } catch (_: Exception) { null }
+                Log.w(TAG, "WebSocket failure: ${t.message}, protocol=${response?.protocol}, code=${response?.code}, body=$body, url=${response?.request?.url}")
                 listener.onDisconnected(t.message ?: "connection failed")
             }
 
