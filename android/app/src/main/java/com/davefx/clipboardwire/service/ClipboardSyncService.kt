@@ -28,6 +28,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
 
     private var backoff = INITIAL_BACKOFF_MS
     private var connectedSince: Long = 0
+    private var serverLabel: String = ""
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         onLocalClipboardChanged()
@@ -36,7 +37,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     override fun onCreate() {
         super.onCreate()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        startForeground(NOTIFICATION_ID, buildNotification("Starting…", null))
         clipboardManager.addPrimaryClipChangedListener(clipListener)
         scope.launch { connectLoop() }
     }
@@ -44,12 +45,15 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     private suspend fun connectLoop() {
         val prefs = Settings.load(this@ClipboardSyncService)
         if (prefs.server.isBlank() || prefs.user.isBlank()) {
-            updateNotification("Not configured — open the app")
+            updateNotification("Not configured", "Open the app to set up")
             return
         }
+        serverLabel = prefs.server
+            .removePrefix("wss://").removePrefix("ws://")
+            .removeSuffix("/sync")
 
         while (isActive()) {
-            updateNotification("Connecting…")
+            updateNotification("Connecting…", serverLabel)
             wsHandler?.close()
             wsHandler = WebSocketHandler(
                 serverUrl = prefs.server,
@@ -66,7 +70,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             }
 
             if (!isActive()) return
-            updateNotification("Disconnected — retrying in ${backoff / 1000}s")
+            updateNotification("Disconnected", "Retrying $serverLabel in ${backoff / 1000}s")
             delay(backoff)
             backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
         }
@@ -90,7 +94,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
         clientId = welcome.clientId
         connectedSince = System.currentTimeMillis()
         backoff = INITIAL_BACKOFF_MS
-        updateNotification("Connected")
+        updateNotification("Connected", serverLabel)
         Log.i(TAG, "connected as ${welcome.clientId}")
 
         welcome.lastClip?.let { applyInboundClip(it) }
@@ -172,7 +176,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
 
     // --- Notification ---
 
-    private fun buildNotification(status: String): Notification {
+    private fun buildNotification(status: String, subtitle: String? = null): Notification {
         ensureNotificationChannel()
 
         val openIntent = packageManager.getLaunchIntentForPackage(packageName)?.let {
@@ -188,8 +192,8 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("clipboardwire")
-            .setContentText(status)
+            .setContentTitle("clipboardwire — $status")
+            .apply { if (subtitle != null) setContentText(subtitle) }
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setOngoing(true)
             .setContentIntent(openIntent)
@@ -197,19 +201,25 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             .build()
     }
 
-    private fun updateNotification(status: String) {
+    private fun updateNotification(status: String, subtitle: String? = null) {
         val nm = getSystemService(NotificationManager::class.java)
-        nm?.notify(NOTIFICATION_ID, buildNotification(status))
+        nm?.notify(NOTIFICATION_ID, buildNotification(status, subtitle))
     }
 
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID, "Clipboard Sync",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            getSystemService(NotificationManager::class.java)
-                ?.createNotificationChannel(channel)
+            val nm = getSystemService(NotificationManager::class.java) ?: return
+            val existing = nm.getNotificationChannel(CHANNEL_ID)
+            if (existing == null) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID, "Clipboard Sync",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    setSound(null, null)
+                    enableVibration(false)
+                }
+                nm.createNotificationChannel(channel)
+            }
         }
     }
 
