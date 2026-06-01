@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Allow cleartext ws:// on private networks for LAN/VPN setups.
-         wss:// is always preferred when the hub has TLS enabled. -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.0.0</domain>
-        <domain includeSubdomains="true">172.16.0.0</domain>
-        <domain includeSubdomains="true">192.168.0.0</domain>
-        <domain includeSubdomains="true">localhost</domain>
-    </domain-config>
+    <!-- Allow cleartext ws:// for LAN/VPN setups where the hub
+         does not have TLS enabled. OkHttp resolves hostnames before
+         connecting, so we must list every IP literal the user might
+         type (private ranges) plus the Android-emulator gateway. -->
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
