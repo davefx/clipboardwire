@@ -3,6 +3,7 @@ package com.davefx.clipboardwire.service
 
 import android.app.*
 import android.content.*
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
@@ -10,6 +11,7 @@ import android.os.IBinder
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
@@ -37,7 +39,12 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     override fun onCreate() {
         super.onCreate()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        startForeground(NOTIFICATION_ID, buildNotification("Starting…", null))
+        ServiceCompat.startForeground(
+            this, NOTIFICATION_ID, buildNotification("Starting…", null),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
+            else 0
+        )
         clipboardManager.addPrimaryClipChangedListener(clipListener)
         scope.launch { connectLoop() }
     }
