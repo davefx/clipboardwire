@@ -1,0 +1,10 @@
+target/
+android/
+assets/
+packaging/
+.git/
+.github/
+*.md
+*.log
+.env
+.env.*

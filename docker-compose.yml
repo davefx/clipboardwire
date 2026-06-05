@@ -1,0 +1,24 @@
+services:
+  clipboardwire:
+    image: ghcr.io/spizzadev/clipboardwire:main
+    restart: unless-stopped
+    ports:
+      - "8484:8484"
+    env_file: .env
+    environment:
+      CLIPBOARDWIRE_BIND: "0.0.0.0:8484"
+      # CLIPBOARDWIRE_MAX_CONNS: "64"
+      # CLIPBOARDWIRE_MAX_FRAME: "10485760"
+      # RUST_LOG: "clipboardwire_core=info"
+      #
+      # Direct TLS — uncomment and mount a cert+key volume instead of using a reverse proxy:
+      # CLIPBOARDWIRE_TLS_CERT_FILE: /certs/cert.pem
+      # CLIPBOARDWIRE_TLS_KEY_FILE: /certs/key.pem
+    # volumes:
+    #   - ./certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/8484"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
