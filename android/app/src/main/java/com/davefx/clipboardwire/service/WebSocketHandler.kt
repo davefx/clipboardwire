@@ -58,7 +58,7 @@ class WebSocketHandler(
 
         webSocket = client!!.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.i(TAG, "WebSocket opened, protocol=${response.protocol}")
+                Log.i(TAG, "WebSocket opened")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -77,8 +77,7 @@ class WebSocketHandler(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val body = try { response?.body?.string()?.take(200) } catch (_: Exception) { null }
-                Log.w(TAG, "WebSocket failure: ${t.message}, protocol=${response?.protocol}, code=${response?.code}, body=$body, url=${response?.request?.url}")
+                Log.w(TAG, "WebSocket failure: ${t.message}")
                 listener.onDisconnected(t.message ?: "connection failed")
             }
 

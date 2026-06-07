@@ -4,6 +4,28 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.5.1] — 2026-06-07
+
+### Fixed
+- **Android: WebSocket connections now work with TLS servers.** OkHttp
+  was negotiating HTTP/2 via ALPN, but the server's WebSocket handler
+  only supports upgrade over HTTP/1.1. The client now forces HTTP/1.1.
+- **Android: foreground service no longer killed on Android 14+.** The
+  `FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING` type is now passed to both
+  `startForeground()` and notification updates, as required by API 34+.
+- **Android: persistent notification now visible.** Shows connection
+  status ("Connected", "Disconnected", "Paused") and the server address
+  in the notification body.
+- **Android: cleartext ws:// now works with any IP address.** The
+  previous network security config used `<domain>` entries which don't
+  match IP literals.
+
+### Added
+- **Android: WiFi-aware reconnect.** When the server is a private IP
+  (192.168.x.x, 10.x.x.x, etc.) and the phone is on mobile data, the
+  service pauses with "Waiting for WiFi" instead of burning battery on
+  failed retries. Reconnects automatically when WiFi comes back.
+
 ## [0.5.0] — 2026-06-01
 
 ### Added
@@ -292,6 +314,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.5.1]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.1
 [0.5.0]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.0
 [0.4.6]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.6
 [0.4.5]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.5
