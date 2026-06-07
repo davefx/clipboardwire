@@ -1,0 +1,25 @@
+services:
+  clipboardwire:
+    image: ghcr.io/spizzadev/clipboardwire:main
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CLIPBOARDWIRE_BIND: "0.0.0.0:8484"
+      # CLIPBOARDWIRE_MAX_CONNS: "64"
+      # CLIPBOARDWIRE_MAX_FRAME: "10485760"
+      # RUST_LOG: "clipboardwire_core=info"
+    labels:
+      - "traefik.enable=true"
+      # Change the Host value to your actual domain:
+      - "traefik.http.routers.clipboardwire.rule=Host(`clipboard.example.com`)"
+      - "traefik.http.routers.clipboardwire.entrypoints=websecure"
+      - "traefik.http.routers.clipboardwire.tls=true"
+      # Change letsencrypt to match your Traefik certresolver name:
+      - "traefik.http.routers.clipboardwire.tls.certresolver=letsencrypt"
+      - "traefik.http.services.clipboardwire.loadbalancer.server.port=8484"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/8484"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
