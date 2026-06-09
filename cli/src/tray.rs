@@ -35,6 +35,8 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
+#[cfg(windows)]
+use tray_icon::menu::CheckMenuItem;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
@@ -148,6 +150,13 @@ pub fn run(
     let stop_hub_item = MenuItem::new("Stop hub", false, None);
     let restart_hub_item = MenuItem::new("Restart hub", false, None);
     let sep2 = PredefinedMenuItem::separator();
+    #[cfg(windows)]
+    let autostart_item = CheckMenuItem::new(
+        "Start at login",
+        true,
+        crate::autostart_win::is_enabled(),
+        None,
+    );
     let quit_item = MenuItem::new("Quit clipboardwire", true, None);
     menu.append(&status_item)?;
     menu.append(&server_item)?;
@@ -160,10 +169,14 @@ pub fn run(
     menu.append(&stop_hub_item)?;
     menu.append(&restart_hub_item)?;
     menu.append(&sep2)?;
+    #[cfg(windows)]
+    menu.append(&autostart_item)?;
     menu.append(&quit_item)?;
 
     let edit_id = edit_item.id().clone();
     let reload_id = reload_item.id().clone();
+    #[cfg(windows)]
+    let autostart_id = autostart_item.id().clone();
     let start_hub_id = start_hub_item.id().clone();
     let stop_hub_id = stop_hub_item.id().clone();
     let restart_hub_id = restart_hub_item.id().clone();
@@ -315,6 +328,29 @@ pub fn run(
                     refresh_tooltip(&tray, &state, &config_path);
                     refresh_icon(&tray, theme, &state);
                 } else {
+                    #[cfg(windows)]
+                    {
+                        if menu_event.id == autostart_id {
+                            // CheckMenuItem auto-toggles before the event fires, so
+                            // `is_checked()` reflects the new desired state.
+                            if autostart_item.is_checked() {
+                                if let Err(e) = crate::autostart_win::enable() {
+                                    warn!(error=%format!("{e:#}"), "could not enable autostart");
+                                    autostart_item.set_checked(false);
+                                } else {
+                                    info!("autostart enabled");
+                                }
+                            } else if let Err(e) = crate::autostart_win::disable() {
+                                warn!(error=%format!("{e:#}"), "could not disable autostart");
+                                autostart_item.set_checked(true);
+                            } else {
+                                info!("autostart disabled");
+                            }
+                        } else {
+                            warn!(id = ?menu_event.id, "ignoring unknown menu event");
+                        }
+                    }
+                    #[cfg(not(windows))]
                     warn!(id = ?menu_event.id, "ignoring unknown menu event");
                 }
             }

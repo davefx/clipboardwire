@@ -40,6 +40,10 @@ egui_kittest = { version = "0.32", features = ["eframe"] }
 zbus = { version = "5", features = ["tokio"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
+[target.'cfg(windows)'.dependencies]
+# Registry access for the "Start at login" tray toggle.
+winreg = "0.52"
+
 [target.'cfg(windows)'.dev-dependencies]
 # UI Automation client for the cross-platform tray-interaction harness.
 # Runs under wine + xvfb when the test is invoked through the Cargo

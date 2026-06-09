@@ -11,6 +11,8 @@
     windows_subsystem = "windows"
 )]
 
+#[cfg(windows)]
+mod autostart_win;
 mod instance;
 mod settings;
 mod tray;
