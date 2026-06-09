@@ -340,11 +340,13 @@ pub fn run(
                                 } else {
                                     info!("autostart enabled");
                                 }
-                            } else if let Err(e) = crate::autostart_win::disable() {
-                                warn!(error=%format!("{e:#}"), "could not disable autostart");
-                                autostart_item.set_checked(true);
                             } else {
-                                info!("autostart disabled");
+                                if let Err(e) = crate::autostart_win::disable() {
+                                    warn!(error=%format!("{e:#}"), "could not disable autostart");
+                                    autostart_item.set_checked(true);
+                                } else {
+                                    info!("autostart disabled");
+                                }
                             }
                         } else {
                             warn!(id = ?menu_event.id, "ignoring unknown menu event");
