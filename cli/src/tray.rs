@@ -145,6 +145,11 @@ pub fn run(
     let sep0 = PredefinedMenuItem::separator();
     let edit_item = MenuItem::new("Edit config…", true, None);
     let reload_item = MenuItem::new("Reload config", true, None);
+    let sep1 = PredefinedMenuItem::separator();
+    let start_hub_item = MenuItem::new("Start hub", false, None);
+    let stop_hub_item = MenuItem::new("Stop hub", false, None);
+    let restart_hub_item = MenuItem::new("Restart hub", false, None);
+    let sep2 = PredefinedMenuItem::separator();
     #[cfg(windows)]
     let autostart_item = CheckMenuItem::new(
         "Start at login",
@@ -152,11 +157,6 @@ pub fn run(
         crate::autostart_win::is_enabled(),
         None,
     );
-    let sep1 = PredefinedMenuItem::separator();
-    let start_hub_item = MenuItem::new("Start hub", false, None);
-    let stop_hub_item = MenuItem::new("Stop hub", false, None);
-    let restart_hub_item = MenuItem::new("Restart hub", false, None);
-    let sep2 = PredefinedMenuItem::separator();
     let quit_item = MenuItem::new("Quit clipboardwire", true, None);
     menu.append(&status_item)?;
     menu.append(&server_item)?;
@@ -164,13 +164,13 @@ pub fn run(
     menu.append(&sep0)?;
     menu.append(&edit_item)?;
     menu.append(&reload_item)?;
-    #[cfg(windows)]
-    menu.append(&autostart_item)?;
     menu.append(&sep1)?;
     menu.append(&start_hub_item)?;
     menu.append(&stop_hub_item)?;
     menu.append(&restart_hub_item)?;
     menu.append(&sep2)?;
+    #[cfg(windows)]
+    menu.append(&autostart_item)?;
     menu.append(&quit_item)?;
 
     let edit_id = edit_item.id().clone();
@@ -340,13 +340,11 @@ pub fn run(
                                 } else {
                                     info!("autostart enabled");
                                 }
+                            } else if let Err(e) = crate::autostart_win::disable() {
+                                warn!(error=%format!("{e:#}"), "could not disable autostart");
+                                autostart_item.set_checked(true);
                             } else {
-                                if let Err(e) = crate::autostart_win::disable() {
-                                    warn!(error=%format!("{e:#}"), "could not disable autostart");
-                                    autostart_item.set_checked(true);
-                                } else {
-                                    info!("autostart disabled");
-                                }
+                                info!("autostart disabled");
                             }
                         } else {
                             warn!(id = ?menu_event.id, "ignoring unknown menu event");

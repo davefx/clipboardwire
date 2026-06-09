@@ -53,3 +53,26 @@ pub fn disable() -> Result<()> {
         Err(e) => Err(anyhow::anyhow!(e)).context("deleting autostart registry entry"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round-trip: enable → is_enabled == true → disable → is_enabled == false.
+    ///
+    /// This test writes to the real HKCU registry on the CI runner, but the
+    /// key (`HKCU\…\Run\clipboardwire`) is cleaned up in the same test, so
+    /// there are no lasting side-effects.
+    #[test]
+    fn enable_disable_round_trip() {
+        // Start from a known clean state.
+        disable().expect("initial disable should succeed");
+        assert!(!is_enabled(), "should not be enabled before the test");
+
+        enable().expect("enable should succeed");
+        assert!(is_enabled(), "should be enabled after enable()");
+
+        disable().expect("disable should succeed");
+        assert!(!is_enabled(), "should not be enabled after disable()");
+    }
+}
