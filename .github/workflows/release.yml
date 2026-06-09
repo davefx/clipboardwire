@@ -42,7 +42,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install Linux tray build deps
-        run: sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
 
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install --locked cargo-deb cargo-generate-rpm
