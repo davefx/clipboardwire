@@ -4,6 +4,20 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [0.5.2] — 2026-06-09
+
+### Added
+- **Windows: "Start at login" tray toggle.** A new checkbox in the
+  tray menu reads and writes the `HKCU\…\Run` registry key, so
+  users can enable or disable auto-start without touching the
+  registry manually. Works whether clipboardwire was installed via
+  MSI or as a standalone binary.
+
+### Fixed
+- **CI: `apt-get update` before install.** Release and CI workflows
+  now refresh the package index before `apt-get install`, preventing
+  transient 404 failures when GitHub runner mirrors go stale.
+
 ## [0.5.1] — 2026-06-07
 
 ### Fixed
@@ -25,6 +39,11 @@ follows [Semantic Versioning](https://semver.org).
   (192.168.x.x, 10.x.x.x, etc.) and the phone is on mobile data, the
   service pauses with "Waiting for WiFi" instead of burning battery on
   failed retries. Reconnects automatically when WiFi comes back.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.5.0] — 2026-06-01
 
@@ -53,6 +72,11 @@ follows [Semantic Versioning](https://semver.org).
   `base-config cleartextTrafficPermitted=true` since this is a
   LAN-first tool where users configure arbitrary IPs.
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.4.6] — 2026-05-27
 
 ### Fixed
@@ -64,6 +88,11 @@ follows [Semantic Versioning](https://semver.org).
   30 s (matching the server) and raising the server's read timeout
   from 45 s to 90 s so a single missed pong doesn't kill the
   connection.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.4.5] — 2026-05-27
 
@@ -78,6 +107,11 @@ follows [Semantic Versioning](https://semver.org).
   `~/.config/clipboardwire/crash.log` before aborting. This survives
   even if the tracing layer hasn't flushed yet.
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.4.4] — 2026-05-26
 
 ### Changed
@@ -85,6 +119,11 @@ follows [Semantic Versioning](https://semver.org).
   log line (opened, closed, errors) includes the client's IP:port in
   the tracing span via axum's `ConnectInfo` extractor, making it easy
   to identify which device is connecting or disconnecting.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.4.3] — 2026-05-25
 
@@ -97,6 +136,11 @@ follows [Semantic Versioning](https://semver.org).
 - **Smaller status-dot overlay on the tray icon.** Reduced from ~35%
   to ~22% of the icon side so the actual icon artwork is more
   visible while the colored connection-status dot still reads clearly.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.4.2] — 2026-05-24
 
@@ -114,6 +158,11 @@ follows [Semantic Versioning](https://semver.org).
   by the tray. A 1-second poller posts a `HubPeerCountChanged`
   event on count shifts; the tooltip rebuilds on each.
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.4.1] — 2026-05-21
 
 ### Added
@@ -127,6 +176,11 @@ follows [Semantic Versioning](https://semver.org).
   background poll re-runs `dark_light::detect()`; if the value
   flips, the icon is rebuilt and swapped in place. No more stuck
   mono-dark icon after a manual light-mode toggle mid-session.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.4.0] — 2026-05-21
 
@@ -185,6 +239,11 @@ follows [Semantic Versioning](https://semver.org).
   streaming wire format for the typical sizes. The smaller v0.4
   items ship first.
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.3.3] — 2026-05-21
 
 ### Added
@@ -199,6 +258,11 @@ follows [Semantic Versioning](https://semver.org).
 ### Changed
 - macOS added to the CI matrix so build regressions are caught before
   they land on a release tag.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.3.2] — 2026-05-20
 
@@ -228,6 +292,11 @@ follows [Semantic Versioning](https://semver.org).
 ### Changed
 - Minimum supported Rust raised to **1.89** (for the now-stable
   `std::fs::File::try_lock` used by the singleton check — no extra dep).
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.3.1] — 2026-05-20
 
@@ -259,6 +328,11 @@ follows [Semantic Versioning](https://semver.org).
   `ws://`, or switch the client URL to `wss://` and set
   `tls_insecure = true` (or pin the cert via `tls_ca_file`).
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.3.0] — 2026-05-20
 
 ### Added
@@ -279,6 +353,11 @@ follows [Semantic Versioning](https://semver.org).
     through the Win 11 "Show Hidden Icons" overflow popup.
   - `egui_kittest` tests for the Settings dialog widget tree.
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.2.1] — 2026-05
 
 ### Added
@@ -288,6 +367,11 @@ follows [Semantic Versioning](https://semver.org).
 - Tier-1 tray smoke test and `MANUAL_SMOKE.md` checklist for
   interactive bits CI can't cover.
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.2.0] — 2026-05
 
 ### Added
@@ -296,6 +380,11 @@ follows [Semantic Versioning](https://semver.org).
 - **Image clipboard support** (PNG over the wire).
 - **Cross-platform tray** — Linux (GTK + libayatana-appindicator)
   and macOS in addition to Windows.
+
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
 
 ## [0.1.1] — 2026-05
 
@@ -307,6 +396,11 @@ follows [Semantic Versioning](https://semver.org).
   (`%APPDATA%\clipboardwire\config.toml` instead of
   `%APPDATA%\clipboardwire\config\config.toml`).
 
+## [0.5.2] — 2026-06-09
+
+### Changed
+- (fill in before pushing)
+
 ## [0.1.0] — 2026-05
 
 ### Added
@@ -314,6 +408,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.5.2]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.2
 [0.5.1]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.1
 [0.5.0]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.0
 [0.4.6]: https://github.com/davefx/clipboardwire/releases/tag/v0.4.6
