@@ -1031,6 +1031,7 @@ dependencies = [
  "tracing-subscriber",
  "tray-icon",
  "uiautomation",
+ "winreg",
  "zbus",
 ]
 
