@@ -189,3 +189,35 @@ jobs:
           script: >-
             ./gradlew connectedDebugAndroidTest
             -Pandroid.testInstrumentationRunnerArguments.testServerUrl=ws://10.0.2.2:18484/sync
+
+  notify-recovery:
+    name: CI recovered
+    if: ${{ github.event_name == 'pull_request' }}
+    needs: [lint, test, android-unit, android-instrumented, android-server-integration]
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      actions: read
+    steps:
+      - name: Check if previous run failed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          PREV=$(gh run list \
+            --branch "$BRANCH" \
+            --workflow CI \
+            --event pull_request \
+            --status completed \
+            --json databaseId,conclusion \
+            --jq "[.[] | select(.databaseId != ($CURRENT_RUN_ID | tonumber))][0].conclusion")
+
+          echo "Previous run conclusion: $PREV"
+
+          if [ "$PREV" = "failure" ] || [ "$PREV" = "timed_out" ]; then
+            gh pr comment "$PR_NUMBER" \
+              --body ":large_green_circle: **CI recovered** — all jobs green again."
+          fi
