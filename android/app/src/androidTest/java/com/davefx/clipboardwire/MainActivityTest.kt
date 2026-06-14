@@ -19,15 +19,17 @@ class MainActivityTest {
         composeRule.onNodeWithText("clipboardwire").assertIsDisplayed()
         composeRule.onNodeWithText("Server URL").assertIsDisplayed()
         composeRule.onNodeWithText("Username").assertIsDisplayed()
-        composeRule.onNodeWithText("Password").assertIsDisplayed()
-        composeRule.onNodeWithText("Skip TLS verification (LAN/VPN only)").assertIsDisplayed()
-        composeRule.onNodeWithText("Save & Connect").assertIsDisplayed()
-        composeRule.onNodeWithText("Stop service").assertIsDisplayed()
+        composeRule.onNodeWithText("Password").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Skip TLS verification (LAN/VPN only)")
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Save & Connect").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Stop service").performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun server_url_field_accepts_input() {
         val field = composeRule.onNodeWithText("Server URL")
+        field.performScrollTo()
         field.performClick()
         field.performTextClearance()
         field.performTextInput("wss://example:8484/sync")
@@ -37,6 +39,7 @@ class MainActivityTest {
     @Test
     fun username_field_accepts_input() {
         val field = composeRule.onNodeWithText("Username")
+        field.performScrollTo()
         field.performClick()
         field.performTextClearance()
         field.performTextInput("bob")
@@ -46,6 +49,7 @@ class MainActivityTest {
     @Test
     fun can_toggle_tls_checkbox() {
         composeRule.onNodeWithText("Skip TLS verification (LAN/VPN only)")
+            .performScrollTo()
             .performClick()
     }
 }

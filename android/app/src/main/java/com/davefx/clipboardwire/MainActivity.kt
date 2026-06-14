@@ -2,9 +2,13 @@
 package com.davefx.clipboardwire
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +37,12 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> }
 
+    private var onBatteryResult: (() -> Unit)? = null
+    private val batteryOptimizationLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            onBatteryResult?.invoke()
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -55,6 +65,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun isBatteryOptimized(): Boolean {
+        val pm = getSystemService(PowerManager::class.java)
+        return !pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun requestBatteryOptimizationExemption(onDone: () -> Unit) {
+        val intent = Intent(
+            ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName")
+        )
+        if (intent.resolveActivity(packageManager) != null) {
+            onBatteryResult = onDone
+            batteryOptimizationLauncher.launch(intent)
+        }
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun SettingsScreen() {
@@ -66,6 +92,8 @@ class MainActivity : ComponentActivity() {
         var passwordVisible by remember { mutableStateOf(false) }
         var loaded by remember { mutableStateOf(false) }
         var saved by remember { mutableStateOf(false) }
+
+        var batteryOptimized by remember { mutableStateOf(isBatteryOptimized()) }
 
         LaunchedEffect(Unit) {
             val s = Settings.load(this@MainActivity)
@@ -89,6 +117,36 @@ class MainActivity : ComponentActivity() {
                 "clipboardwire",
                 style = MaterialTheme.typography.headlineMedium
             )
+
+            if (batteryOptimized) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            "Battery optimization is enabled",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "The system may kill the background service. " +
+                                "Tap below to exempt clipboardwire.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(onClick = {
+                            requestBatteryOptimizationExemption {
+                                batteryOptimized = isBatteryOptimized()
+                            }
+                        }) {
+                            Text("Disable battery optimization")
+                        }
+                    }
+                }
+            }
 
             OutlinedTextField(
                 value = server,
