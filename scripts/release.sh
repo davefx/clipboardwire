@@ -43,14 +43,8 @@ NEW_CODE=$((OLD_CODE + 1))
 sed -i "s/versionCode = $OLD_CODE/versionCode = $NEW_CODE/" "$ANDROID_GRADLE"
 echo "Android: versionCode $OLD_CODE → $NEW_CODE, versionName → $VERSION"
 
-# 5. CHANGELOG.md — insert new section after the preamble
-# Find the first "## [" line and insert before it
-sed -i "/^## \[/i\\
-## [$VERSION] — $DATE\\
-\\
-### Changed\\
-- (fill in before pushing)\\
-" "$ROOT/CHANGELOG.md"
+# 5. CHANGELOG.md — insert new section before the first "## [" line only
+sed -i "0,/^## \[/s//## [$VERSION] — $DATE\n\n### Changed\n- (fill in before pushing)\n\n## [/" "$ROOT/CHANGELOG.md"
 
 # Add link reference
 sed -i "/^\[$PREV_VERSION\]: /i\\
