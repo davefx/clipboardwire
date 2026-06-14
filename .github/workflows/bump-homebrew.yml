@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Check out the tap repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: davefx/homebrew-clipboardwire
           # A personal access token with `repo` scope is needed here
