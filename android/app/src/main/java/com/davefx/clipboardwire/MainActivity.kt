@@ -81,7 +81,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun SettingsScreen() {
         val scope = rememberCoroutineScope()
@@ -161,20 +160,23 @@ class MainActivity : ComponentActivity() {
             // Mode toggle
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Mode", modifier = Modifier.weight(1f))
-                SingleChoiceSegmentedButtonRow {
-                    SegmentedButton(
-                        selected = !serverMode,
-                        onClick = { serverMode = false; saved = false },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                    ) { Text("Client") }
-                    SegmentedButton(
-                        selected = serverMode,
-                        onClick = { serverMode = true; saved = false },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                    ) { Text("Server") }
+                if (!serverMode) {
+                    Button(onClick = {}) { Text("Client") }
+                } else {
+                    OutlinedButton(onClick = { serverMode = false; saved = false }) {
+                        Text("Client")
+                    }
+                }
+                if (serverMode) {
+                    Button(onClick = {}) { Text("Server") }
+                } else {
+                    OutlinedButton(onClick = { serverMode = true; saved = false }) {
+                        Text("Server")
+                    }
                 }
             }
 
