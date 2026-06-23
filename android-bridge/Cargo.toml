@@ -1,0 +1,17 @@
+[package]
+name = "clipboardwire-android-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+clipboardwire-core = { path = "../core", default-features = false }
+jni = { version = "0.21", default-features = false }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

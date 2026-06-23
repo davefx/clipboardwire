@@ -52,6 +52,8 @@ async fn start_server_with_stats(max_conns: usize, stats: Option<HubStatsSink>) 
         tls_disabled: true,
         state_dir: None,
         stats,
+        ping_interval_secs: 30,
+        read_timeout_secs: 90,
     };
     let (app, _hub_join) = build_app(cfg);
     let task = tokio::spawn(async move {

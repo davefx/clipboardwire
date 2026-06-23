@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core", "cli"]
+members = ["core", "cli", "android-bridge"]
 
 [workspace.package]
 version = "0.5.3"

@@ -36,6 +36,8 @@ fn server_cfg(addr: std::net::SocketAddr) -> ServerConfig {
         tls_disabled: true,
         state_dir: None,
         stats: None,
+        ping_interval_secs: 30,
+        read_timeout_secs: 90,
     }
 }
 

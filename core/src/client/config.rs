@@ -37,6 +37,14 @@ fn default_hub_max_frame() -> usize {
     MAX_FRAME_BYTES
 }
 
+fn default_hub_ping_interval() -> u64 {
+    30
+}
+
+fn default_hub_read_timeout() -> u64 {
+    90
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClientConfig {
@@ -112,6 +120,14 @@ pub struct HubConfig {
     /// the client config file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_dir: Option<PathBuf>,
+    /// WebSocket ping interval in seconds. Higher values save battery
+    /// on mobile/embedded deployments. Default: 30.
+    #[serde(default = "default_hub_ping_interval")]
+    pub ping_interval_secs: u64,
+    /// WebSocket read timeout in seconds. Should be at least 2-3x
+    /// `ping_interval_secs`. Default: 90.
+    #[serde(default = "default_hub_read_timeout")]
+    pub read_timeout_secs: u64,
 }
 
 impl Default for HubConfig {
@@ -127,6 +143,8 @@ impl Default for HubConfig {
             tls_key_file: None,
             tls_disabled: false,
             state_dir: None,
+            ping_interval_secs: default_hub_ping_interval(),
+            read_timeout_secs: default_hub_read_timeout(),
         }
     }
 }
@@ -146,6 +164,8 @@ impl HubConfig {
             tls_disabled: self.tls_disabled,
             state_dir: self.state_dir.clone(),
             stats: None,
+            ping_interval_secs: self.ping_interval_secs,
+            read_timeout_secs: self.read_timeout_secs,
         }
     }
 }

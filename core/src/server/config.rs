@@ -15,6 +15,8 @@ use crate::protocol::MAX_FRAME_BYTES;
 
 const DEFAULT_BIND: &str = "0.0.0.0:8484";
 const DEFAULT_MAX_CONNS: usize = 64;
+const DEFAULT_PING_INTERVAL_SECS: u64 = 30;
+const DEFAULT_READ_TIMEOUT_SECS: u64 = 90;
 
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -40,6 +42,14 @@ pub struct ServerConfig {
     /// into the config to surface the connected-peers count in the
     /// tray tooltip; standalone `serve` users leave it `None`.
     pub stats: Option<crate::server::hub::HubStatsSink>,
+    /// WebSocket ping interval in seconds. Lower values detect dead
+    /// connections faster; higher values reduce CPU wakeups and save
+    /// battery on embedded/mobile deployments. Default: 30.
+    pub ping_interval_secs: u64,
+    /// WebSocket read timeout in seconds. A connection with no inbound
+    /// frames (including pongs) for this long is considered dead.
+    /// Should be at least 2-3x `ping_interval_secs`. Default: 90.
+    pub read_timeout_secs: u64,
 }
 
 impl ServerConfig {
@@ -102,6 +112,11 @@ impl ServerConfig {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from);
 
+        let ping_interval_secs = parse_env_u64("CLIPBOARDWIRE_PING_INTERVAL")?
+            .unwrap_or(DEFAULT_PING_INTERVAL_SECS);
+        let read_timeout_secs = parse_env_u64("CLIPBOARDWIRE_READ_TIMEOUT")?
+            .unwrap_or(DEFAULT_READ_TIMEOUT_SECS);
+
         Ok(Self {
             bind,
             user,
@@ -113,6 +128,8 @@ impl ServerConfig {
             tls_disabled,
             state_dir,
             stats: None,
+            ping_interval_secs,
+            read_timeout_secs,
         })
     }
 
@@ -191,6 +208,11 @@ impl ServerConfig {
             .map(PathBuf::from)
             .or(base.state_dir);
 
+        let ping_interval_secs = parse_env_u64("CLIPBOARDWIRE_PING_INTERVAL")?
+            .unwrap_or(base.ping_interval_secs);
+        let read_timeout_secs = parse_env_u64("CLIPBOARDWIRE_READ_TIMEOUT")?
+            .unwrap_or(base.read_timeout_secs);
+
         Ok(Self {
             bind,
             user,
@@ -202,6 +224,8 @@ impl ServerConfig {
             tls_disabled,
             state_dir,
             stats: None,
+            ping_interval_secs,
+            read_timeout_secs,
         })
     }
 }
@@ -238,6 +262,17 @@ fn resolve_password() -> Result<String> {
     }
 }
 
+fn parse_env_u64(name: &str) -> Result<Option<u64>> {
+    match env::var(name) {
+        Ok(s) => s
+            .parse::<u64>()
+            .map(Some)
+            .with_context(|| format!("{name} must be a non-negative integer")),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(e) => Err(anyhow!("{name}: {e}")),
+    }
+}
+
 fn parse_env_usize(name: &str) -> Result<Option<usize>> {
     match env::var(name) {
         Ok(s) => s
@@ -270,6 +305,8 @@ mod tests {
                 "CLIPBOARDWIRE_MAX_FRAME",
                 "CLIPBOARDWIRE_TLS_CERT_FILE",
                 "CLIPBOARDWIRE_TLS_KEY_FILE",
+                "CLIPBOARDWIRE_PING_INTERVAL",
+                "CLIPBOARDWIRE_READ_TIMEOUT",
             ] {
                 env::remove_var(v);
             }

@@ -40,6 +40,8 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val networkReady = kotlinx.coroutines.channels.Channel<Unit>(1)
 
+    private var isServerMode = false
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         onLocalClipboardChanged()
     }
@@ -61,19 +63,87 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
 
     private suspend fun connectLoop() {
         val prefs = Settings.load(this@ClipboardSyncService)
-        if (prefs.server.isBlank() || prefs.user.isBlank()) {
+        if (!prefs.isConfigured) {
             updateNotification("Not configured", "Open the app to set up")
             return
         }
+
+        isServerMode = prefs.serverMode
+
+        if (isServerMode) {
+            serverModeLoop(prefs)
+        } else {
+            clientModeLoop(prefs)
+        }
+    }
+
+    private suspend fun serverModeLoop(prefs: Settings) {
+        val port = prefs.serverPort
+        val stateDir = filesDir.absolutePath
+
+        updateNotification("Starting server…", "Port $port")
+
+        val started = NativeServer.start(
+            bindPort = port,
+            user = prefs.serverUser,
+            password = prefs.serverPassword,
+            stateDir = stateDir,
+            tlsDisabled = true,
+            pingIntervalSecs = 90,
+            readTimeoutSecs = 270
+        )
+        if (!started) {
+            updateNotification("Server failed", "Could not bind port $port")
+            return
+        }
+        Log.i(TAG, "embedded server started on port $port")
+
+        serverLabel = ":$port"
+        updateNotification("Server running", "Port $port — 0 clients")
+
+        // Periodically update the notification with the client count,
+        // then connect the local WebSocket client.
+        val notifyJob = scope.launch {
+            while (isActive()) {
+                delay(5_000)
+                if (NativeServer.isRunning) {
+                    val count = NativeServer.clientCount
+                    updateNotification(
+                        "Server running",
+                        "Port $port — $count client${if (count != 1) "s" else ""}"
+                    )
+                }
+            }
+        }
+
+        // Connect a local WebSocket client so this device's clipboard
+        // participates in the sync.
+        val localServerUrl = "ws://127.0.0.1:$port/sync"
+        val localPrefs = Settings(
+            server = localServerUrl,
+            user = prefs.serverUser,
+            password = prefs.serverPassword,
+            tlsInsecure = false
+        )
+
+        try {
+            clientModeLoop(localPrefs)
+        } finally {
+            notifyJob.cancel()
+            NativeServer.stop()
+        }
+    }
+
+    private suspend fun clientModeLoop(prefs: Settings) {
         serverLabel = prefs.server
             .removePrefix("wss://").removePrefix("ws://")
             .removeSuffix("/sync")
 
         serverIsPrivate = isPrivateAddress(serverLabel.substringBefore(":"))
-        if (serverIsPrivate) registerNetworkCallback()
+        if (serverIsPrivate && !isServerMode) registerNetworkCallback()
 
         while (isActive()) {
-            if (serverIsPrivate && !hasWifi()) {
+            if (serverIsPrivate && !isServerMode && !hasWifi()) {
                 updateNotification("Paused", "Waiting for WiFi — $serverLabel is a LAN address")
                 Log.i(TAG, "server is on a private IP, waiting for WiFi")
                 networkReady.receiveCatching()
@@ -81,7 +151,9 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
                 backoff = INITIAL_BACKOFF_MS
             }
 
-            updateNotification("Connecting…", serverLabel)
+            if (!isServerMode) {
+                updateNotification("Connecting…", serverLabel)
+            }
             wsHandler?.close()
             wsHandler = WebSocketHandler(
                 serverUrl = prefs.server,
@@ -97,7 +169,9 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             }
 
             if (!isActive()) return
-            updateNotification("Disconnected", "Retrying $serverLabel in ${backoff / 1000}s")
+            if (!isServerMode) {
+                updateNotification("Disconnected", "Retrying $serverLabel in ${backoff / 1000}s")
+            }
             delay(backoff)
             backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF_MS)
         }
@@ -160,7 +234,9 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
         clientId = welcome.clientId
         connectedSince = System.currentTimeMillis()
         backoff = INITIAL_BACKOFF_MS
-        updateNotification("Connected", serverLabel)
+        if (!isServerMode) {
+            updateNotification("Connected", serverLabel)
+        }
         Log.i(TAG, "connected as ${welcome.clientId}")
 
         welcome.lastClip?.let { applyInboundClip(it) }
@@ -309,6 +385,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
             stopping = true
             scope.cancel()
             wsHandler?.close()
+            NativeServer.stop()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -323,6 +400,7 @@ class ClipboardSyncService : Service(), WebSocketHandler.Listener {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         scope.cancel()
         wsHandler?.close()
+        NativeServer.stop()
         super.onDestroy()
     }
 

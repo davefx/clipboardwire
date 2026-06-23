@@ -46,8 +46,6 @@ pub struct AppState {
     pub conn_sem: Arc<Semaphore>,
 }
 
-const PING_INTERVAL: Duration = Duration::from_secs(30);
-const READ_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Axum handler for `GET /sync`. Returns the upgrade response on success, or
 /// 401 / 503 on failure.
@@ -130,13 +128,16 @@ async fn handle_socket(
         return;
     }
 
+    let ping_interval = Duration::from_secs(state.config.ping_interval_secs);
+    let read_timeout = Duration::from_secs(state.config.read_timeout_secs);
+
     let (sink, mut stream) = socket.split();
 
     // Writer task: owns the sink, multiplexes the three sources.
     let writer_state = state.clone();
     let writer = tokio::spawn(async move {
         let mut sink = sink;
-        let mut ping_timer = interval(PING_INTERVAL);
+        let mut ping_timer = interval(ping_interval);
         // Skip the immediate first tick so we don't ping on connect.
         ping_timer.tick().await;
 
@@ -201,7 +202,7 @@ async fn handle_socket(
     let reader_internal_tx = internal_tx.clone();
     let reader = tokio::spawn(async move {
         loop {
-            let next = tokio::time::timeout(READ_TIMEOUT, stream.next()).await;
+            let next = tokio::time::timeout(read_timeout, stream.next()).await;
             let msg = match next {
                 Ok(Some(Ok(m))) => m,
                 Ok(Some(Err(e))) => {
@@ -345,6 +346,8 @@ mod tests {
                 tls_disabled: true,
                 state_dir: None,
                 stats: None,
+                ping_interval_secs: 30,
+                read_timeout_secs: 90,
             }),
             conn_sem: Arc::new(Semaphore::new(8)),
         }
