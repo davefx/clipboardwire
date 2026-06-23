@@ -81,7 +81,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     fun SettingsScreen() {
         val scope = rememberCoroutineScope()
@@ -93,6 +92,12 @@ class MainActivity : ComponentActivity() {
         var loaded by remember { mutableStateOf(false) }
         var saved by remember { mutableStateOf(false) }
 
+        var serverMode by remember { mutableStateOf(false) }
+        var serverPort by remember { mutableStateOf("8484") }
+        var serverUser by remember { mutableStateOf("") }
+        var serverPassword by remember { mutableStateOf("") }
+        var serverPasswordVisible by remember { mutableStateOf(false) }
+
         var batteryOptimized by remember { mutableStateOf(isBatteryOptimized()) }
 
         LaunchedEffect(Unit) {
@@ -101,6 +106,10 @@ class MainActivity : ComponentActivity() {
             user = s.user
             password = s.password
             tlsInsecure = s.tlsInsecure
+            serverMode = s.serverMode
+            serverPort = s.serverPort.toString()
+            serverUser = s.serverUser
+            serverPassword = s.serverPassword
             loaded = true
         }
 
@@ -148,52 +157,53 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            OutlinedTextField(
-                value = server,
-                onValueChange = { server = it; saved = false },
-                label = { Text("Server URL") },
-                placeholder = { Text("wss://192.168.1.100:8484/sync") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            OutlinedTextField(
-                value = user,
-                onValueChange = { user = it; saved = false },
-                label = { Text("Username") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            OutlinedTextField(
-                value = password,
-                onValueChange = { password = it; saved = false },
-                label = { Text("Password") },
-                singleLine = true,
-                visualTransformation = if (passwordVisible)
-                    VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                        Icon(
-                            if (passwordVisible) Icons.Default.VisibilityOff
-                            else Icons.Default.Visibility,
-                            contentDescription = "Toggle password visibility"
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
+            // Mode toggle
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Checkbox(
-                    checked = tlsInsecure,
-                    onCheckedChange = { tlsInsecure = it; saved = false }
+                Text("Mode", modifier = Modifier.weight(1f))
+                if (!serverMode) {
+                    Button(onClick = {}) { Text("Client") }
+                } else {
+                    OutlinedButton(onClick = { serverMode = false; saved = false }) {
+                        Text("Client")
+                    }
+                }
+                if (serverMode) {
+                    Button(onClick = {}) { Text("Server") }
+                } else {
+                    OutlinedButton(onClick = { serverMode = true; saved = false }) {
+                        Text("Server")
+                    }
+                }
+            }
+
+            if (serverMode) {
+                ServerModeFields(
+                    port = serverPort,
+                    onPortChange = { serverPort = it; saved = false },
+                    user = serverUser,
+                    onUserChange = { serverUser = it; saved = false },
+                    password = serverPassword,
+                    onPasswordChange = { serverPassword = it; saved = false },
+                    passwordVisible = serverPasswordVisible,
+                    onPasswordVisibilityChange = { serverPasswordVisible = it }
                 )
-                Text("Skip TLS verification (LAN/VPN only)")
+            } else {
+                ClientModeFields(
+                    server = server,
+                    onServerChange = { server = it; saved = false },
+                    user = user,
+                    onUserChange = { user = it; saved = false },
+                    password = password,
+                    onPasswordChange = { password = it; saved = false },
+                    passwordVisible = passwordVisible,
+                    onPasswordVisibilityChange = { passwordVisible = it },
+                    tlsInsecure = tlsInsecure,
+                    onTlsInsecureChange = { tlsInsecure = it; saved = false }
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -201,13 +211,21 @@ class MainActivity : ComponentActivity() {
             Button(
                 onClick = {
                     scope.launch {
+                        val portInt = serverPort.toIntOrNull() ?: 8484
                         Settings.save(
                             this@MainActivity,
-                            Settings(server, user, password, tlsInsecure)
+                            Settings(
+                                server, user, password, tlsInsecure,
+                                serverMode, portInt, serverUser, serverPassword
+                            )
                         )
                         saved = true
                         ClipboardSyncService.stop(this@MainActivity)
-                        if (server.isNotBlank() && user.isNotBlank()) {
+                        val settings = Settings(
+                            server, user, password, tlsInsecure,
+                            serverMode, portInt, serverUser, serverPassword
+                        )
+                        if (settings.isConfigured) {
                             kotlinx.coroutines.delay(500)
                             ClipboardSyncService.start(this@MainActivity)
                         }
@@ -225,5 +243,115 @@ class MainActivity : ComponentActivity() {
                 Text("Stop service")
             }
         }
+    }
+
+    @Composable
+    private fun ClientModeFields(
+        server: String, onServerChange: (String) -> Unit,
+        user: String, onUserChange: (String) -> Unit,
+        password: String, onPasswordChange: (String) -> Unit,
+        passwordVisible: Boolean, onPasswordVisibilityChange: (Boolean) -> Unit,
+        tlsInsecure: Boolean, onTlsInsecureChange: (Boolean) -> Unit
+    ) {
+        OutlinedTextField(
+            value = server,
+            onValueChange = onServerChange,
+            label = { Text("Server URL") },
+            placeholder = { Text("wss://192.168.1.100:8484/sync") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = user,
+            onValueChange = onUserChange,
+            label = { Text("Username") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            label = { Text("Password") },
+            singleLine = true,
+            visualTransformation = if (passwordVisible)
+                VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { onPasswordVisibilityChange(!passwordVisible) }) {
+                    Icon(
+                        if (passwordVisible) Icons.Default.VisibilityOff
+                        else Icons.Default.Visibility,
+                        contentDescription = "Toggle password visibility"
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Checkbox(
+                checked = tlsInsecure,
+                onCheckedChange = onTlsInsecureChange
+            )
+            Text("Skip TLS verification (LAN/VPN only)")
+        }
+    }
+
+    @Composable
+    private fun ServerModeFields(
+        port: String, onPortChange: (String) -> Unit,
+        user: String, onUserChange: (String) -> Unit,
+        password: String, onPasswordChange: (String) -> Unit,
+        passwordVisible: Boolean, onPasswordVisibilityChange: (Boolean) -> Unit
+    ) {
+        Text(
+            "This device will run a clipboard hub server. " +
+                "Other devices connect to it as clients.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        OutlinedTextField(
+            value = port,
+            onValueChange = { onPortChange(it.filter { c -> c.isDigit() }) },
+            label = { Text("Listen port") },
+            placeholder = { Text("8484") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = user,
+            onValueChange = onUserChange,
+            label = { Text("Username") },
+            supportingText = { Text("Clients connect with these credentials") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+            value = password,
+            onValueChange = onPasswordChange,
+            label = { Text("Password") },
+            singleLine = true,
+            visualTransformation = if (passwordVisible)
+                VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                IconButton(onClick = { onPasswordVisibilityChange(!passwordVisible) }) {
+                    Icon(
+                        if (passwordVisible) Icons.Default.VisibilityOff
+                        else Icons.Default.Visibility,
+                        contentDescription = "Toggle password visibility"
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

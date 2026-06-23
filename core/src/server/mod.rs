@@ -105,9 +105,14 @@ fn resolved_state_dir(config: &ServerConfig) -> Result<std::path::PathBuf> {
     if let Some(d) = &config.state_dir {
         return Ok(d.clone());
     }
-    let base =
-        directories::BaseDirs::new().context("could not locate the platform's data directory")?;
-    Ok(base.data_dir().join("clipboardwire"))
+    #[cfg(feature = "client")]
+    {
+        let base = directories::BaseDirs::new()
+            .context("could not locate the platform's data directory")?;
+        Ok(base.data_dir().join("clipboardwire"))
+    }
+    #[cfg(not(feature = "client"))]
+    anyhow::bail!("state_dir is required (set CLIPBOARDWIRE_STATE_DIR)")
 }
 
 async fn serve_tls(

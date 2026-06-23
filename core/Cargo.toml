@@ -5,6 +5,19 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["client"]
+client = [
+    "dep:toml",
+    "dep:directories",
+    "dep:arboard",
+    "dep:tokio-tungstenite",
+    "dep:http",
+    "dep:blake3",
+    "dep:webpki-roots",
+    "dep:image",
+]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,15 +39,15 @@ rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"]
 sha2 = "0.10"
 hostname = "0.4"
 
-# client-side
-toml = "0.9"
-directories = "6"
-arboard = { version = "3", default-features = false, features = ["image-data"] }
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
-http = "1"
-blake3 = "1"
-webpki-roots = "1"
-image = { version = "0.25", default-features = false, features = ["png"] }
+# client-side (gated behind `client` feature for Android builds)
+toml = { version = "0.9", optional = true }
+directories = { version = "6", optional = true }
+arboard = { version = "3", default-features = false, features = ["image-data"], optional = true }
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"], optional = true }
+http = { version = "1", optional = true }
+blake3 = { version = "1", optional = true }
+webpki-roots = { version = "1", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
 
 # File-clipboard adapter: arboard doesn't expose the text/uri-list
 # selection target, so we run a parallel X11 clipboard owner on

@@ -1,3 +1,4 @@
 -keepattributes Signature
 -keep class com.davefx.clipboardwire.service.Protocol$* { *; }
+-keep class com.davefx.clipboardwire.service.NativeServer { *; }
 -dontwarn okhttp3.**
