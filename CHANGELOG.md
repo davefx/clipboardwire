@@ -4,6 +4,16 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- **`-v` / `--verbose` flag.** A global flag that raises log verbosity
+  without setting an env var: `-v` enables debug and `-vv` enables trace
+  for both `clipboardwire` and `clipboardwire_core`. `RUST_LOG` still
+  takes precedence when set. Useful for diagnosing clipboard issues
+  (e.g. whether a local copy is being detected) from a plain terminal
+  run.
+
 ## [0.5.3] — 2026-06-14
 
 ### Changed

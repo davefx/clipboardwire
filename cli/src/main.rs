@@ -37,6 +37,11 @@ struct Cli {
     /// Show a system-tray icon while running.
     #[arg(long, global = true)]
     tray: bool,
+
+    /// Increase log verbosity: `-v` for debug, `-vv` for trace.
+    /// Ignored if `RUST_LOG` is set (that takes precedence).
+    #[arg(short, long, global = true, action = clap::ArgAction::Count)]
+    verbose: u8,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -63,8 +68,8 @@ fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     attach_parent_console();
 
-    init_tracing();
     let cli = Cli::parse();
+    init_tracing(cli.verbose);
     let no_subcommand = cli.command.is_none();
     let cmd = cli.command.clone().unwrap_or(Command::Connect);
 
@@ -97,9 +102,19 @@ fn main() -> Result<()> {
     }
 }
 
-fn init_tracing() {
+/// Default log filter when `RUST_LOG` is unset, keyed off `-v` count.
+fn default_filter(verbose: u8) -> &'static str {
+    match verbose {
+        0 => "clipboardwire=info,clipboardwire_core=info",
+        1 => "clipboardwire=debug,clipboardwire_core=debug",
+        _ => "clipboardwire=trace,clipboardwire_core=trace",
+    }
+}
+
+fn init_tracing(verbose: u8) {
+    // `RUST_LOG` wins when set; otherwise `-v`/`-vv` pick the level.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "clipboardwire=info,clipboardwire_core=info".into());
+        .unwrap_or_else(|_| default_filter(verbose).into());
 
     if let Some(log_dir) = log_dir() {
         let file_appender = tracing_appender::rolling::daily(&log_dir, "clipboardwire.log");
