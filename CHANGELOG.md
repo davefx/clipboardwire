@@ -4,6 +4,19 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- **Linux/Wayland: local copies now detected on modern compositors.**
+  Enabled arboard's `wayland-data-control` feature so the client uses a
+  native Wayland clipboard backend (via wl-clipboard-rs ≥ 0.9.2, which
+  supports `ext-data-control-v1`) instead of falling back to X11/XWayland.
+  Previously, text/images copied in native Wayland apps were never picked
+  up and published on compositors that expose only `ext-data-control-v1`
+  and not the older `wlr-data-control-unstable-v1` — e.g. current KDE
+  Plasma 6 — so sync worked one way (remote → local) but not the other
+  (local → remote). ([#7](https://github.com/davefx/clipboardwire/issues/7))
+
 ## [0.5.3] — 2026-06-14
 
 ### Changed

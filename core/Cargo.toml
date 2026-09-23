@@ -29,7 +29,12 @@ hostname = "0.4"
 # client-side
 toml = "0.9"
 directories = "6"
-arboard = { version = "3", default-features = false, features = ["image-data"] }
+# `wayland-data-control` gives arboard a native Wayland clipboard backend
+# (via wl-clipboard-rs) instead of falling back to X11/XWayland. Without it,
+# local copies made in native Wayland apps aren't detected on compositors that
+# only expose the newer ext-data-control-v1 protocol (e.g. KDE Plasma 6). The
+# feature is a no-op on Windows/macOS, where arboard uses native APIs.
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 http = "1"
 blake3 = "1"
