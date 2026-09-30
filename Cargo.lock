@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "clipboardwire"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -1038,7 +1038,7 @@ dependencies = [
 
 [[package]]
 name = "clipboardwire-core"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "arboard",
