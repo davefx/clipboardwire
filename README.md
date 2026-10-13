@@ -254,7 +254,8 @@ Test suite:
 
 ```sh
 cargo test --workspace                                  # unit + integration
-xvfb-run -a cargo test --workspace -- --ignored        # tray + DBus + UIA
+xvfb-run -a cargo test --workspace -- --ignored --skip native_wayland # tray + DBus + UIA
+tools/test-wayland-files.sh                             # native Wayland files; needs sway
 ```
 
 ## Status & roadmap
@@ -266,10 +267,13 @@ v0.4 shipped the big v0.4 roadmap items: file sync via the clipboard
 icon status overlay, "Pin from server" button in the Settings dialog,
 macOS `.app` / `.dmg` packaging, and a Homebrew tap.
 
+The development version also supports native Wayland file selections using
+`ext-data-control-v1` or `wlr-data-control`, including Nautilus's
+`x-special/gnome-copied-files` format. X11 remains the fallback when native
+data-control is unavailable.
+
 Still on the list for later patches:
 
-- Native Wayland file-clipboard via `wl_data_device` (Xwayland
-  already covers most setups, so the urgency is low).
 - A "stop hub at quit" semantics polish so the embedded hub task
   doesn't outlive the tray if the system shutdowns it via signal.
 - End-to-end encryption between peers — for a deployment shape

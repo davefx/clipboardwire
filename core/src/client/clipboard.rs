@@ -215,8 +215,12 @@ fn poll_clipboard(
                 *last_files = Some(paths.clone());
                 return Some(ClipChange::Files(paths));
             }
+            // File managers also offer the names as plain text. Once the
+            // files are sent (or applied), do not overwrite the peer's file
+            // clipboard with those names on the next poll.
+            return None;
         }
-        Ok(_) => {}
+        Ok(_) => *last_files = None,
         Err(e) => {
             trace!(error = %format!("{e:#}"), "files_clipboard read transient failure");
         }

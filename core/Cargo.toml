@@ -41,12 +41,12 @@ blake3 = "1"
 webpki-roots = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
-# File-clipboard adapter: arboard doesn't expose the text/uri-list
-# selection target, so we run a parallel X11 clipboard owner on
-# Linux. Conditional dep because Windows + macOS handle files via
-# their own native APIs.
+# File-clipboard adapter: arboard doesn't expose file-list targets.
+# Linux uses native Wayland data-control when available, with an X11
+# fallback. Windows + macOS use their own native APIs.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-clipboard = "0.9"
+wl-clipboard-rs = "0.9.2"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

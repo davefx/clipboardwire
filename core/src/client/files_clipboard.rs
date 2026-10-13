@@ -12,10 +12,10 @@
 //! - **Linux X11:** [`x11-clipboard`] for the `text/uri-list`
 //!   selection target. Stores/loads `file://…` URIs.
 //! - **Windows:** [`clipboard-win`] for `CF_HDROP`.
-//! - **macOS:** TODO (NSPasteboardTypeFileURL — covered by tests
-//!   in CI's macos-latest job; the runtime impl is the next step).
-//! - **Linux Wayland:** TODO (Xwayland covers a lot of cases via
-//!   the X11 path; native `wl_data_device` is a follow-up).
+//! - **macOS:** NSPasteboardTypeFileURL.
+//! - **Linux Wayland:** native data-control via `wl-clipboard-rs`,
+//!   accepting both `text/uri-list` and Nautilus's
+//!   `x-special/gnome-copied-files`.
 //!
 //! For platforms not yet supported, the read returns `None` and
 //! the write is a no-op — the wire-level file transfer still
@@ -43,18 +43,21 @@ pub fn write_files(paths: &[PathBuf]) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 mod backend {
+    use std::io::Read;
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::sync::OnceLock;
     use std::time::Duration;
 
     use anyhow::{Context, Result};
+    use wl_clipboard_rs::{copy, paste};
     use x11_clipboard::Clipboard;
 
     /// One-shot wait for `load`. Polling cadence on the supervisor
     /// is already 300 ms by default; 200 ms here is a safe ceiling
     /// for "is the clipboard holding files."
     const LOAD_TIMEOUT: Duration = Duration::from_millis(200);
+    const MAX_FILE_LIST_BYTES: u64 = 4 * 1024 * 1024;
 
     /// Long-lived X11 clipboard handle. We *must* keep one
     /// `Clipboard` alive for the whole process lifetime — on X11
@@ -75,6 +78,13 @@ mod backend {
     }
 
     pub fn read_files() -> Result<Option<Vec<PathBuf>>> {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            match read_files_wayland() {
+                Ok(paths) => return Ok(paths),
+                Err(error) => tracing::trace!(%error, "Wayland files unavailable; trying X11"),
+            }
+        }
+
         let cb = clipboard()?
             .lock()
             .map_err(|_| anyhow::anyhow!("X11 clipboard mutex poisoned"))?;
@@ -101,6 +111,13 @@ mod backend {
         if paths.is_empty() {
             return Ok(());
         }
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            match write_files_wayland(paths) {
+                Ok(()) => return Ok(()),
+                Err(error) => tracing::trace!(%error, "Wayland files unavailable; trying X11"),
+            }
+        }
+
         let cb = clipboard()?
             .lock()
             .map_err(|_| anyhow::anyhow!("X11 clipboard mutex poisoned"))?;
@@ -112,6 +129,74 @@ mod backend {
         cb.store(cb.setter.atoms.clipboard, uri_list_atom, body)
             .context("storing X11 text/uri-list selection")?;
         Ok(())
+    }
+
+    fn read_files_wayland() -> Result<Option<Vec<PathBuf>>> {
+        let types =
+            match paste::get_mime_types(paste::ClipboardType::Regular, paste::Seat::Unspecified) {
+                Ok(types) => types,
+                Err(
+                    paste::Error::ClipboardEmpty | paste::Error::NoSeats | paste::Error::NoMimeType,
+                ) => {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error).context("listing Wayland clipboard formats"),
+            };
+        let mime = if types.contains("text/uri-list") {
+            "text/uri-list"
+        } else if types.contains("x-special/gnome-copied-files") {
+            "x-special/gnome-copied-files"
+        } else {
+            return Ok(None);
+        };
+        let (pipe, _) = match paste::get_contents(
+            paste::ClipboardType::Regular,
+            paste::Seat::Unspecified,
+            paste::MimeType::Specific(mime),
+        ) {
+            Ok(contents) => contents,
+            // The user may replace the clipboard between the two requests.
+            Err(paste::Error::ClipboardEmpty | paste::Error::NoMimeType) => return Ok(None),
+            Err(error) => return Err(error).context("reading Wayland file clipboard"),
+        };
+        let mut bytes = Vec::new();
+        pipe.take(MAX_FILE_LIST_BYTES + 1).read_to_end(&mut bytes)?;
+        anyhow::ensure!(
+            bytes.len() as u64 <= MAX_FILE_LIST_BYTES,
+            "Wayland file list exceeds {MAX_FILE_LIST_BYTES} bytes"
+        );
+        // The GNOME format starts with "copy" or "cut"; the URI parser
+        // ignores that line. A remote transfer always copies, never deletes.
+        Ok(Some(parse_uri_list(&bytes)))
+    }
+
+    fn write_files_wayland(paths: &[PathBuf]) -> Result<()> {
+        let uris = render_uri_list(paths);
+        let gnome = render_gnome_copied_files(paths);
+        let mut options = copy::Options::new();
+        // A file selection must not also be published as plain text.
+        options.omit_additional_text_mime_types(true);
+        options
+            .copy_multi(vec![
+                copy::MimeSource {
+                    source: copy::Source::Bytes(uris.into_boxed_slice()),
+                    mime_type: copy::MimeType::Specific("text/uri-list".into()),
+                },
+                copy::MimeSource {
+                    source: copy::Source::Bytes(gnome.into_boxed_slice()),
+                    mime_type: copy::MimeType::Specific("x-special/gnome-copied-files".into()),
+                },
+            ])
+            .context("setting Wayland file clipboard")
+    }
+
+    fn render_gnome_copied_files(paths: &[PathBuf]) -> Vec<u8> {
+        let mut out = String::from("copy");
+        for path in paths {
+            out.push_str("\nfile://");
+            out.push_str(&percent_encode_path(&path.to_string_lossy()));
+        }
+        out.into_bytes()
     }
 
     fn parse_uri_list(bytes: &[u8]) -> Vec<PathBuf> {
@@ -242,6 +327,29 @@ mod backend {
         #[test]
         fn percent_encodes_spaces() {
             assert!(percent_encode_path("/a b").contains("%20"));
+        }
+
+        #[test]
+        fn parses_nautilus_copy_and_cut_formats() {
+            for action in ["copy", "cut"] {
+                let body = format!("{action}\nfile:///tmp/a%20b.pdf\nfile:///tmp/c.txt");
+                assert_eq!(
+                    parse_uri_list(body.as_bytes()),
+                    vec![PathBuf::from("/tmp/a b.pdf"), PathBuf::from("/tmp/c.txt")]
+                );
+            }
+        }
+
+        #[test]
+        fn gnome_format_has_no_trailing_empty_line() {
+            let paths = vec![
+                PathBuf::from("/tmp/a b.txt"),
+                PathBuf::from("/tmp/žluťoučký.pdf"),
+            ];
+            let bytes = render_gnome_copied_files(&paths);
+            assert!(bytes.starts_with(b"copy\nfile://"));
+            assert!(!bytes.ends_with(b"\n"));
+            assert_eq!(parse_uri_list(&bytes), paths);
         }
     }
 }

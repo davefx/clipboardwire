@@ -42,7 +42,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-dev libayatana-appindicator3-dev libxdo-dev \
-            xvfb dbus \
+            xvfb dbus sway \
             libxkbcommon-x11-0 libxkbcommon0 \
             libfontconfig1 \
             libgl1 libgles2 libegl1 \
@@ -86,6 +86,9 @@ jobs:
       - name: File-clipboard roundtrip — Linux
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a cargo test --workspace --test clipboard_files_roundtrip -- --ignored --nocapture
+      - name: Native Wayland file clipboard — Linux under headless Sway
+        if: matrix.os == 'ubuntu-latest'
+        run: tools/test-wayland-files.sh
       - name: File-clipboard roundtrip — Windows
         if: matrix.os == 'windows-latest'
         run: cargo test --workspace --test clipboard_files_roundtrip -- --ignored --nocapture

@@ -4,6 +4,14 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- **Linux/Wayland: sync files copied in native file managers.** Read and
+  write file selections through Wayland data-control, including Nautilus's
+  `x-special/gnome-copied-files` format. Keep file selections from being
+  overwritten by their plain-text names on a later clipboard poll.
+
 ## [0.5.4] — 2026-09-30
 
 ### Fixed
