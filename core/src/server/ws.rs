@@ -14,6 +14,9 @@
 //!    - periodic WebSocket Pings every 30 s.
 //! 6. On either task exiting, we deregister and the semaphore permit is
 //!    dropped, freeing capacity.
+//! 7. When the server that accepted the connection stops, the writer sends
+//!    a `1012 Service Restart` close so the client reconnects to whatever
+//!    hub is listening now instead of staying attached to an orphaned one.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -25,7 +28,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::sink::SinkExt;
 use futures_util::stream::StreamExt;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{mpsc, watch, Semaphore};
 use tokio::time::interval;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
@@ -44,7 +47,24 @@ pub struct AppState {
     pub hub: HubHandle,
     pub config: Arc<ServerConfig>,
     pub conn_sem: Arc<Semaphore>,
+    /// Closes every open connection when its sender is dropped. `None`
+    /// means connections are never closed by the server stopping (used
+    /// by tests that drive the router directly).
+    pub shutdown: Option<watch::Receiver<()>>,
 }
+
+/// Resolves once the server owning `shutdown` has stopped. Nothing is
+/// ever sent on the channel: dropping the sender is the signal, so an
+/// aborted `serve` task stops its connections too.
+async fn server_stopped(shutdown: Option<watch::Receiver<()>>) {
+    match shutdown {
+        Some(mut rx) => while rx.changed().await.is_ok() {},
+        None => std::future::pending().await,
+    }
+}
+
+/// WebSocket close code 1012 (RFC 6455 registry: "Service Restart").
+const CLOSE_SERVICE_RESTART: u16 = 1012;
 
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(90);
@@ -134,15 +154,28 @@ async fn handle_socket(
 
     // Writer task: owns the sink, multiplexes the three sources.
     let writer_state = state.clone();
-    let writer = tokio::spawn(async move {
+    let stopped = server_stopped(state.shutdown.clone());
+    let mut writer = tokio::spawn(async move {
         let mut sink = sink;
         let mut ping_timer = interval(PING_INTERVAL);
         // Skip the immediate first tick so we don't ping on connect.
         ping_timer.tick().await;
+        tokio::pin!(stopped);
 
         loop {
             tokio::select! {
                 biased;
+
+                _ = &mut stopped => {
+                    info!("hub stopping; closing connection");
+                    let _ = sink
+                        .send(Message::Close(Some(CloseFrame {
+                            code: CLOSE_SERVICE_RESTART,
+                            reason: "hub stopping".into(),
+                        })))
+                        .await;
+                    break;
+                }
 
                 maybe_frame = internal_rx.recv() => {
                     let Some(frame) = maybe_frame else { break };
@@ -199,7 +232,7 @@ async fn handle_socket(
     // hub or emits an `error` and exits.
     let reader_hub = state.hub.clone();
     let reader_internal_tx = internal_tx.clone();
-    let reader = tokio::spawn(async move {
+    let mut reader = tokio::spawn(async move {
         loop {
             let next = tokio::time::timeout(READ_TIMEOUT, stream.next()).await;
             let msg = match next {
@@ -304,10 +337,13 @@ async fn handle_socket(
         debug!("reader exiting");
     });
 
-    // Wait for either side to end, then tear the other down.
+    // Wait for either side to end, then tear the other down. A finished
+    // reader leaves the writer running so it can flush a queued `error`
+    // frame; it exits once deregistration closes its channels. A finished
+    // writer means the sink is gone, so the reader has nothing left to do.
     tokio::select! {
-        _ = reader => {},
-        _ = writer => {},
+        _ = &mut reader => {},
+        _ = &mut writer => reader.abort(),
     }
     state.hub.deregister(client_id).await;
     info!("connection closed");
@@ -347,6 +383,7 @@ mod tests {
                 stats: None,
             }),
             conn_sem: Arc::new(Semaphore::new(8)),
+            shutdown: None,
         }
     }
 
