@@ -13,7 +13,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use axum::routing::get;
 use axum::Router;
-use tokio::sync::Semaphore;
+use tokio::sync::{watch, Semaphore};
 use tracing::info;
 
 pub use config::ServerConfig;
@@ -29,13 +29,33 @@ pub fn router(state: AppState) -> Router {
 
 /// Spin up the hub task and build a fully-stateful axum router. Returns the
 /// router plus the hub's join handle (useful for orderly shutdown in tests).
+///
+/// Connections accepted by this router are never closed by the server
+/// stopping; [`serve`] uses [`build_app_with_shutdown`] instead.
 pub fn build_app(config: ServerConfig) -> (Router, tokio::task::JoinHandle<()>) {
+    build_app_inner(config, None)
+}
+
+/// Like [`build_app`], but every WebSocket connection is closed (with
+/// `1012 Service Restart`) once `shutdown`'s sender is dropped.
+pub fn build_app_with_shutdown(
+    config: ServerConfig,
+    shutdown: watch::Receiver<()>,
+) -> (Router, tokio::task::JoinHandle<()>) {
+    build_app_inner(config, Some(shutdown))
+}
+
+fn build_app_inner(
+    config: ServerConfig,
+    shutdown: Option<watch::Receiver<()>>,
+) -> (Router, tokio::task::JoinHandle<()>) {
     let (hub, hub_join) = hub::spawn_with_stats(config.max_conns, config.stats.clone());
     let conn_sem = Arc::new(Semaphore::new(config.max_conns));
     let state = AppState {
         hub,
         config: Arc::new(config),
         conn_sem,
+        shutdown,
     };
     (router(state), hub_join)
 }
@@ -59,6 +79,10 @@ pub async fn bind(
 
 /// Serve the hub on a pre-bound listener until `shutdown` resolves.
 ///
+/// Open WebSocket connections are closed when this future returns *or is
+/// dropped* (e.g. its task aborted), so clients reconnect to whichever hub
+/// takes over the port instead of lingering on this one.
+///
 /// Wire protocol decision tree:
 /// - `tls_disabled = true`  → plain `ws://` (LAN/VPN escape hatch).
 /// - cert+key paths set     → `wss://` using those files.
@@ -69,8 +93,12 @@ pub async fn serve(
     mut config: ServerConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> Result<()> {
+    // Held for the lifetime of this future; dropping it closes every
+    // connection the hub accepted.
+    let (_conns_open, conns_rx) = watch::channel(());
+
     if config.tls_disabled {
-        let (app, _hub_join) = build_app(config);
+        let (app, _hub_join) = build_app_with_shutdown(config, conns_rx);
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -93,7 +121,7 @@ pub async fn serve(
         config.tls_key_file = Some(ensured.key_path);
     }
 
-    serve_tls(listener, config, shutdown).await
+    serve_tls(listener, config, shutdown, conns_rx).await
 }
 
 /// Resolve where to persist auto-generated TLS state. Order:
@@ -114,6 +142,7 @@ async fn serve_tls(
     listener: tokio::net::TcpListener,
     config: ServerConfig,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+    conns_rx: watch::Receiver<()>,
 ) -> Result<()> {
     let cert = config
         .tls_cert_file
@@ -146,7 +175,7 @@ async fn serve_tls(
         handle_for_shutdown.graceful_shutdown(Some(std::time::Duration::from_secs(5)));
     });
 
-    let (app, _hub_join) = build_app(config);
+    let (app, _hub_join) = build_app_with_shutdown(config, conns_rx);
     axum_server::from_tcp_rustls(std_listener, tls)
         .handle(handle)
         .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())

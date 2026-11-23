@@ -4,6 +4,17 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- **Hub: restarting the embedded hub no longer strands connected
+  clients.** "Restart hub" and saving Settings stopped only the accept
+  loop; connections opened before the restart kept running against the
+  orphaned hub, so those clients (typically the tray's own local client)
+  looked connected but no longer exchanged clips with anyone on the new
+  hub. Stopping a hub now closes every open connection with `1012
+  Service Restart`, and clients reconnect to the new one.
+
 ## [0.5.4] — 2026-09-30
 
 ### Fixed
