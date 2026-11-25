@@ -12,7 +12,7 @@ pub mod transport;
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::protocol::{is_text_content_type, ClipFrame, IMAGE_PNG_CONTENT_TYPE, TEXT_CONTENT_TYPE};
@@ -99,12 +99,18 @@ pub async fn run_supervisor(mut clipboard: Clipboard, mut transport: Transport) 
                                 continue;
                             }
                         };
+                        info!(
+                            content_type = %frame.content_type,
+                            bytes = payload_len(&frame),
+                            "publishing local clip"
+                        );
                         if let Err(e) = transport.outbound_tx.try_send(frame) {
                             warn!(error = %e, "transport outbound full or closed; dropping local change");
                         }
                     }
                     // Files: multi-chunk transfer per path.
                     ClipChange::Files(paths) => {
+                        info!(count = paths.len(), "publishing local files");
                         for path in paths {
                             if let Err(e) = file::send_file_through(
                                 &path,
@@ -127,6 +133,12 @@ pub async fn run_supervisor(mut clipboard: Clipboard, mut transport: Transport) 
                     debug!("transport inbound channel closed; supervisor exiting");
                     return;
                 };
+                info!(
+                    from = %clip.from.map(|u| u.to_string()).unwrap_or_default(),
+                    content_type = %clip.content_type,
+                    bytes = payload_len(&clip),
+                    "received remote clip"
+                );
                 let change = match frame_to_change(&clip) {
                     Ok(c) => c,
                     Err(FrameRejection::UnsupportedType) => {
@@ -192,6 +204,15 @@ pub async fn run_supervisor(mut clipboard: Clipboard, mut transport: Transport) 
             else => return,
         }
     }
+}
+
+/// Size of a clip's payload as carried on the wire (text bytes, or the
+/// base64 length for binary types). Logged instead of the content.
+fn payload_len(clip: &ClipFrame) -> usize {
+    clip.content
+        .as_ref()
+        .or(clip.content_b64.as_ref())
+        .map_or(0, String::len)
 }
 
 /// How long to wait for additional file completions before applying

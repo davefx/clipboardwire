@@ -66,6 +66,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tokio-tungstenite = "0.29"

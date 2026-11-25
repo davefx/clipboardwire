@@ -103,6 +103,7 @@ async fn file_sent_by_one_client_arrives_intact_at_the_other() {
             status_tx: Some(recv_status_tx),
             receive_files: true,
             one_shot: false,
+            read_timeout: None,
         },
     );
     let mut inbound_files_rx = receiver_transport
@@ -136,6 +137,7 @@ async fn file_sent_by_one_client_arrives_intact_at_the_other() {
             status_tx: Some(send_status_tx),
             receive_files: false,
             one_shot: true,
+            read_timeout: None,
         },
     );
 
@@ -205,6 +207,7 @@ async fn multi_chunk_file_round_trips_intact() {
             status_tx: Some(recv_status_tx),
             receive_files: true,
             one_shot: false,
+            read_timeout: None,
         },
     );
     let mut inbound_files_rx = receiver_transport.inbound_files_rx.take().unwrap();
@@ -229,6 +232,7 @@ async fn multi_chunk_file_round_trips_intact() {
             status_tx: Some(send_status_tx),
             receive_files: false,
             one_shot: true,
+            read_timeout: None,
         },
     );
 
