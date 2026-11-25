@@ -32,6 +32,10 @@ const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 const RESET_AFTER_STABLE: Duration = Duration::from_secs(30);
 const PING_INTERVAL: Duration = Duration::from_secs(30);
+/// Default for [`SpawnOptions::read_timeout`]. Both sides ping every
+/// 30 s, so three missed rounds means the hub is gone or wedged (asleep,
+/// network dropped without a FIN) and waiting longer can't help.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(90);
 const INBOUND_BUF: usize = 32;
 const OUTBOUND_BUF: usize = 8;
 /// File chunks are bigger than clips and naturally back-pressured by
@@ -86,6 +90,10 @@ pub struct SpawnOptions {
     /// one-shot `clipboardwire send` subcommand which doesn't want
     /// the supervisor's reconnect-forever behavior.
     pub one_shot: bool,
+    /// Give up on a connection (and reconnect) when nothing at all —
+    /// not even a pong — has arrived from the hub for this long.
+    /// `None` uses [`READ_TIMEOUT`].
+    pub read_timeout: Option<Duration>,
 }
 
 /// Spawn the transport task. Returns the supervisor-facing handle and a join
@@ -107,6 +115,7 @@ pub fn spawn_with_status(
             status_tx,
             receive_files: true,
             one_shot: false,
+            read_timeout: None,
         },
     )
 }
@@ -131,8 +140,10 @@ pub fn spawn_with_options(
     let SpawnOptions {
         status_tx,
         one_shot,
+        read_timeout,
         ..
     } = options;
+    let read_timeout = read_timeout.unwrap_or(READ_TIMEOUT);
     let join = tokio::spawn(async move {
         run_loop(
             config,
@@ -141,7 +152,10 @@ pub fn spawn_with_options(
             outbound_rx,
             outbound_files_rx,
             status_tx,
-            one_shot,
+            LoopOptions {
+                one_shot,
+                read_timeout,
+            },
         )
         .await;
     });
@@ -156,6 +170,12 @@ pub fn spawn_with_options(
     )
 }
 
+/// The scalar knobs of [`run_loop`], resolved from [`SpawnOptions`].
+struct LoopOptions {
+    one_shot: bool,
+    read_timeout: Duration,
+}
+
 #[instrument(skip_all, fields(server = %config.server))]
 async fn run_loop(
     config: ClientConfig,
@@ -164,7 +184,10 @@ async fn run_loop(
     mut outbound_rx: mpsc::Receiver<ClipFrame>,
     mut outbound_files_rx: mpsc::Receiver<FileChunkFrame>,
     status_tx: Option<watch::Sender<ClientStatus>>,
-    one_shot: bool,
+    LoopOptions {
+        one_shot,
+        read_timeout,
+    }: LoopOptions,
 ) {
     let emit = |s: ClientStatus| {
         if let Some(tx) = status_tx.as_ref() {
@@ -184,6 +207,7 @@ async fn run_loop(
             &mut outbound_rx,
             &mut outbound_files_rx,
             status_tx.as_ref(),
+            read_timeout,
         )
         .await;
         match &outcome {
@@ -238,6 +262,7 @@ async fn connect_and_serve(
     outbound_rx: &mut mpsc::Receiver<ClipFrame>,
     outbound_files_rx: &mut mpsc::Receiver<FileChunkFrame>,
     status_tx: Option<&watch::Sender<ClientStatus>>,
+    read_timeout: Duration,
 ) -> Result<()> {
     let mut req = config
         .server
@@ -264,9 +289,9 @@ async fn connect_and_serve(
     let (mut sink, mut stream) = ws.split();
 
     // First frame must be `welcome`.
-    let first = stream
-        .next()
+    let first = tokio::time::timeout(read_timeout, stream.next())
         .await
+        .map_err(|_| anyhow!("no welcome from hub within {read_timeout:?}"))?
         .ok_or_else(|| anyhow!("connection closed before welcome"))??;
     let welcome = match first {
         Message::Text(s) => match serde_json::from_str::<Frame>(&s)? {
@@ -289,9 +314,16 @@ async fn connect_and_serve(
 
     let mut ping_timer = tokio::time::interval(PING_INTERVAL);
     ping_timer.tick().await; // skip the immediate first tick
+                             // Reset on every inbound message, pongs included.
+    let idle = tokio::time::sleep(read_timeout);
+    tokio::pin!(idle);
 
     loop {
         tokio::select! {
+            _ = &mut idle => {
+                warn!(timeout = ?read_timeout, "nothing received from hub; reconnecting");
+                bail!("read timeout: no traffic from hub for {read_timeout:?}");
+            }
             outbound = outbound_rx.recv() => {
                 let Some(clip) = outbound else {
                     debug!("outbound channel closed; draining outbound_files before exit");
@@ -326,6 +358,7 @@ async fn connect_and_serve(
                     debug!("stream ended");
                     return Ok(());
                 };
+                idle.as_mut().reset(tokio::time::Instant::now() + read_timeout);
                 match msg? {
                     Message::Text(s) => {
                         let frame: Frame = match serde_json::from_str(&s) {

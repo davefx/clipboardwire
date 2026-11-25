@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use tokio::sync::mpsc;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::files_clipboard;
 
@@ -163,6 +163,11 @@ fn apply_change(
             if let Err(e) = cb.set_text(text.clone()) {
                 warn!(error = %e, "clipboard set_text failed");
             } else {
+                info!(
+                    kind = "text",
+                    bytes = text.len(),
+                    "applied remote clip to clipboard"
+                );
                 *last_text = Some(text);
             }
         }
@@ -181,6 +186,12 @@ fn apply_change(
             if let Err(e) = cb.set_image(arboard_image) {
                 warn!(error = %e, "clipboard set_image failed");
             } else {
+                info!(
+                    kind = "image",
+                    width = img.width,
+                    height = img.height,
+                    "applied remote clip to clipboard"
+                );
                 *last_image = Some(img);
             }
         }
@@ -188,6 +199,11 @@ fn apply_change(
             trace!(kind = "files", count = paths.len(), "applying clip");
             match files_clipboard::write_files(&paths) {
                 Ok(()) => {
+                    info!(
+                        kind = "files",
+                        count = paths.len(),
+                        "applied remote clip to clipboard"
+                    );
                     // Echo suppression: when our own poll next runs
                     // it'll find these exact paths and skip them.
                     *last_files = Some(paths);

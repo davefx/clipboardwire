@@ -1070,6 +1070,7 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "uuid",
  "webpki-roots 1.0.7",
  "x11-clipboard",

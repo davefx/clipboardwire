@@ -9,12 +9,13 @@ pub mod tls;
 pub mod ws;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::routing::get;
 use axum::Router;
 use tokio::sync::{watch, Semaphore};
-use tracing::info;
+use tracing::{info, warn};
 
 pub use config::ServerConfig;
 pub use ws::AppState;
@@ -75,6 +76,98 @@ pub async fn bind(
         .with_context(|| format!("binding {}", config.bind))?;
     let addr = listener.local_addr().unwrap_or(config.bind);
     Ok((listener, addr))
+}
+
+/// Like [`bind`], but keeps retrying for up to `max_wait` while the port
+/// is still held (`EADDRINUSE`). A restart drops the previous listener
+/// asynchronously, so an immediate re-bind of the same port can lose the
+/// race. Any other error is returned at once.
+pub async fn bind_with_retry(
+    config: &ServerConfig,
+    max_wait: Duration,
+) -> Result<(tokio::net::TcpListener, std::net::SocketAddr)> {
+    let deadline = tokio::time::Instant::now() + max_wait;
+    loop {
+        match bind(config).await {
+            Ok(bound) => return Ok(bound),
+            Err(e) if is_addr_in_use(&e) && tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(BIND_RETRY_INTERVAL).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn is_addr_in_use(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<std::io::Error>()
+        .is_some_and(|io| io.kind() == std::io::ErrorKind::AddrInUse)
+}
+
+const BIND_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+/// How long a supervised restart waits for the port to free up.
+const SUPERVISED_REBIND_WAIT: Duration = Duration::from_secs(5);
+const SUPERVISED_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+const SUPERVISED_MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// A run at least this long resets the restart backoff.
+const SUPERVISED_STABLE_AFTER: Duration = Duration::from_secs(30);
+
+/// Serve the hub and keep it up: whenever [`serve`] fails or returns
+/// before `shutdown` resolves, re-bind the same address and start it
+/// again with exponential backoff (1 s → 30 s). Returns only once
+/// `shutdown` resolves (or this future is dropped, which — as with
+/// [`serve`] — also closes every open connection).
+pub async fn serve_supervised(
+    listener: tokio::net::TcpListener,
+    mut config: ServerConfig,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> Result<()> {
+    use futures_util::FutureExt as _;
+
+    // Re-bind exactly what we were handed, even if the config asked
+    // for port 0.
+    if let Ok(addr) = listener.local_addr() {
+        config.bind = addr;
+    }
+    let shutdown = shutdown.boxed().shared();
+    let mut next_listener = Some(listener);
+    let mut backoff = SUPERVISED_INITIAL_BACKOFF;
+
+    loop {
+        let listener = match next_listener.take() {
+            Some(l) => Some(l),
+            None => tokio::select! {
+                _ = shutdown.clone() => return Ok(()),
+                bound = bind_with_retry(&config, SUPERVISED_REBIND_WAIT) => match bound {
+                    Ok((l, _)) => Some(l),
+                    Err(e) => {
+                        warn!(error = %format!("{e:#}"), "hub restart: bind failed");
+                        None
+                    }
+                },
+            },
+        };
+
+        if let Some(listener) = listener {
+            let started = tokio::time::Instant::now();
+            let result = serve(listener, config.clone(), shutdown.clone()).await;
+            if shutdown.peek().is_some() {
+                return result;
+            }
+            match result {
+                Ok(()) => warn!("hub exited unexpectedly; restarting"),
+                Err(e) => warn!(error = %format!("{e:#}"), "hub failed; restarting"),
+            }
+            if started.elapsed() >= SUPERVISED_STABLE_AFTER {
+                backoff = SUPERVISED_INITIAL_BACKOFF;
+            }
+        }
+
+        tokio::select! {
+            _ = shutdown.clone() => return Ok(()),
+            _ = tokio::time::sleep(backoff) => {}
+        }
+        backoff = (backoff * 2).min(SUPERVISED_MAX_BACKOFF);
+    }
 }
 
 /// Serve the hub on a pre-bound listener until `shutdown` resolves.

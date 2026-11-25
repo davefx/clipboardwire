@@ -204,6 +204,7 @@ async fn run_send_once(
             status_tx: None,
             receive_files: false,
             one_shot: true,
+            read_timeout: None,
         },
     );
 

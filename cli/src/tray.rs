@@ -80,6 +80,10 @@ const THEME_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(
 /// measurable cost.
 const HUB_STATS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How long starting the embedded hub waits for its port to be released
+/// (e.g. by the hub that "Restart hub" just aborted) before giving up.
+const HUB_REBIND_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Tray-level handles that need to outlive a Reload event.
 struct State {
     supervisor: Option<JoinHandle<Result<()>>>,
@@ -573,7 +577,12 @@ fn start_embedded_hub_with_cfg(
     let stats = HubStatsSink::new();
     server_cfg.stats = Some(stats.clone());
 
-    let (listener, addr) = match handle.block_on(clipboardwire_core::server::bind(&server_cfg)) {
+    // Retry while the port is still held: on "Restart hub" the previous
+    // hub's listener is released asynchronously after `abort()`.
+    let (listener, addr) = match handle.block_on(clipboardwire_core::server::bind_with_retry(
+        &server_cfg,
+        HUB_REBIND_WAIT,
+    )) {
         Ok((l, a)) => l_and_a_clear(state, l, a),
         Err(e) => {
             // Visible failure: the user almost always hits this when
@@ -605,8 +614,14 @@ fn start_embedded_hub_with_cfg(
     let cfg_for_serve = server_cfg.clone();
     let h = handle.spawn(async move {
         let result =
-            clipboardwire_core::server::serve(listener, cfg_for_serve, std::future::pending())
-                .await;
+            // Supervised: if the hub fails or exits on its own it is
+            // re-bound and restarted with backoff instead of staying down.
+            clipboardwire_core::server::serve_supervised(
+                listener,
+                cfg_for_serve,
+                std::future::pending(),
+            )
+            .await;
         let summary = match &result {
             Ok(()) => "clean exit".to_string(),
             Err(e) => format!("{e:#}"),

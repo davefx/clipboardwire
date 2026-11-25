@@ -4,6 +4,28 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- **Hub: "Restart hub" no longer leaves the hub down.** The restart
+  re-bound the port before the aborted hub had released it and failed
+  with `EADDRINUSE`, leaving no hub running until the app was quit and
+  relaunched. Starting the embedded hub now retries the bind for up to
+  3 s.
+
+### Added
+- **Hub self-supervision.** If the embedded hub fails or exits on its
+  own, it is re-bound and restarted automatically with backoff
+  (1 s → 30 s) instead of staying down.
+- **Client read timeout.** A client that hears nothing from its hub for
+  90 s (not even a pong), e.g. after sleep or a network drop without a
+  clean close, now gives up on the connection and reconnects instead of
+  waiting forever.
+- **Clip traffic in the log.** The client logs every clip it publishes,
+  receives and applies to the clipboard (type, size and origin, never
+  the content), so a lost clip can be traced to the side that dropped
+  it.
+
 ## [0.5.5] — 2026-11-23
 
 ### Fixed
