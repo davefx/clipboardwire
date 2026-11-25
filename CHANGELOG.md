@@ -4,7 +4,7 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.5.6] — 2026-11-25
 
 ### Fixed
 - **Hub: "Restart hub" no longer leaves the hub down.** The restart
@@ -392,6 +392,7 @@ follows [Semantic Versioning](https://semver.org).
   TLS via `rustls`, native `.deb` / `.rpm` / `.msi` packages, GitHub
   Actions CI matrix on Linux + Windows.
 
+[0.5.6]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.6
 [0.5.5]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.5
 [0.5.4]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.4
 [0.5.3]: https://github.com/davefx/clipboardwire/releases/tag/v0.5.3
