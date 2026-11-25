@@ -282,14 +282,13 @@ mod tests {
 
     fn write_config(content: &str) -> PathBuf {
         let mut path = std::env::temp_dir();
+        // A UUID, not the clock: macOS only has microsecond resolution,
+        // so parallel tests could get the same "nanosecond" timestamp
+        // and overwrite each other's config file.
         path.push(format!(
             "clipboardwire-test-cfg-{}-{}.toml",
             std::process::id(),
-            // tiny disambiguator so parallel tests don't clobber each other
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            uuid::Uuid::new_v4()
         ));
         fs::write(&path, content).unwrap();
         #[cfg(unix)]
@@ -298,6 +297,15 @@ mod tests {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
         }
         path
+    }
+
+    #[test]
+    fn write_config_paths_are_unique() {
+        let paths: std::collections::HashSet<_> = (0..200).map(|_| write_config("")).collect();
+        for p in &paths {
+            let _ = fs::remove_file(p);
+        }
+        assert_eq!(paths.len(), 200, "write_config reused a temp path");
     }
 
     #[test]
