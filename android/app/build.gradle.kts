@@ -11,8 +11,8 @@ android {
         applicationId = "com.davefx.clipboardwire"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.5.6"
+        versionCode = 9
+        versionName = "0.5.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
     }
