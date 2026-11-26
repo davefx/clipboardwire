@@ -47,6 +47,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # their own native APIs.
 [target.'cfg(target_os = "linux")'.dependencies]
 x11-clipboard = "0.9"
+# Only to mirror arboard's Wayland-vs-X11 backend choice (see
+# `detect_text_writer`); arboard already pulls it in.
+wl-clipboard-rs = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"
