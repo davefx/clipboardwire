@@ -35,6 +35,93 @@ use super::files_clipboard;
 /// Default-buffer size for the outbound events channel.
 const EVENT_BUFFER: usize = 32;
 
+/// Waits between attempts to write a clip while another program holds the
+/// clipboard (Windows only lets one process open it at a time, and
+/// clipboard managers, RDP and Office grab it briefly after every copy).
+/// About 2.5 s in total before the clip is given up on.
+const OCCUPIED_RETRY_DELAYS: [Duration; 6] = [
+    Duration::from_millis(50),
+    Duration::from_millis(100),
+    Duration::from_millis(200),
+    Duration::from_millis(400),
+    Duration::from_millis(800),
+    Duration::from_millis(1000),
+];
+
+/// Which code path writes text clips to the OS clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextWriter {
+    /// `arboard::Clipboard::set_text` (Windows, macOS, Wayland data-control).
+    Arboard,
+    /// Our own X11 selection owner. arboard's X11 backend advertises text
+    /// targets it won't serve; see [`super::x11_selection`].
+    #[cfg(target_os = "linux")]
+    X11,
+}
+
+/// Mirror arboard's own Linux backend choice (made in
+/// `arboard::Clipboard::new`): Wayland data-control when a Wayland session
+/// offers it, X11 otherwise. Only arboard's X11 text path is broken, so
+/// that's the only case we take over.
+#[cfg(target_os = "linux")]
+fn pick_text_writer(wayland_session: bool, data_control: impl FnOnce() -> bool) -> TextWriter {
+    if wayland_session && data_control() {
+        TextWriter::Arboard
+    } else {
+        TextWriter::X11
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn detect_text_writer() -> TextWriter {
+    pick_text_writer(std::env::var_os("WAYLAND_DISPLAY").is_some(), || {
+        wl_clipboard_rs::utils::is_primary_selection_supported().is_ok()
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn detect_text_writer() -> TextWriter {
+    TextWriter::Arboard
+}
+
+fn write_text(
+    cb: &mut arboard::Clipboard,
+    writer: TextWriter,
+    text: &str,
+) -> Result<(), arboard::Error> {
+    match writer {
+        TextWriter::Arboard => cb.set_text(text),
+        #[cfg(target_os = "linux")]
+        TextWriter::X11 => {
+            super::x11_selection::store_text(text).map_err(|e| arboard::Error::Unknown {
+                description: format!("{e:#}"),
+            })
+        }
+    }
+}
+
+/// Run a clipboard write, retrying it after each of `delays` while it fails
+/// with [`arboard::Error::ClipboardOccupied`]. Any other error is returned
+/// at once.
+fn retry_while_occupied<T>(
+    delays: &[Duration],
+    mut op: impl FnMut() -> Result<T, arboard::Error>,
+) -> Result<T, arboard::Error> {
+    let mut delays = delays.iter();
+    loop {
+        match op() {
+            Err(arboard::Error::ClipboardOccupied) => match delays.next() {
+                Some(delay) => {
+                    debug!(retry_in = ?delay, "clipboard held by another program; retrying");
+                    std::thread::sleep(*delay);
+                }
+                None => return Err(arboard::Error::ClipboardOccupied),
+            },
+            other => return other,
+        }
+    }
+}
+
 /// Owned RGBA image, in row-major order (4 bytes per pixel, R-G-B-A).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageBytes {
@@ -98,7 +185,8 @@ fn run_arboard_loop(
             return;
         }
     };
-    debug!(poll_ms, "clipboard thread started");
+    let text_writer = detect_text_writer();
+    debug!(poll_ms, ?text_writer, "clipboard thread started");
 
     // Per-kind last-seen trackers — copying text doesn't reset the image
     // cache, so each medium needs its own slot.
@@ -117,6 +205,7 @@ fn run_arboard_loop(
             Ok(change) => {
                 apply_change(
                     &mut cb,
+                    text_writer,
                     change,
                     &mut last_text,
                     &mut last_image,
@@ -152,6 +241,7 @@ fn run_arboard_loop(
 
 fn apply_change(
     cb: &mut arboard::Clipboard,
+    text_writer: TextWriter,
     change: ClipChange,
     last_text: &mut Option<String>,
     last_image: &mut Option<ImageBytes>,
@@ -160,7 +250,9 @@ fn apply_change(
     match change {
         ClipChange::Text(text) => {
             trace!(kind = "text", len = text.len(), "applying clip");
-            if let Err(e) = cb.set_text(text.clone()) {
+            if let Err(e) = retry_while_occupied(&OCCUPIED_RETRY_DELAYS, || {
+                write_text(cb, text_writer, &text)
+            }) {
                 warn!(error = %e, "clipboard set_text failed");
             } else {
                 info!(
@@ -181,9 +273,11 @@ fn apply_change(
             let arboard_image = arboard::ImageData {
                 width: img.width as usize,
                 height: img.height as usize,
-                bytes: std::borrow::Cow::Owned(img.rgba.clone()),
+                bytes: std::borrow::Cow::Borrowed(&img.rgba),
             };
-            if let Err(e) = cb.set_image(arboard_image) {
+            if let Err(e) = retry_while_occupied(&OCCUPIED_RETRY_DELAYS, || {
+                cb.set_image(arboard_image.clone())
+            }) {
                 warn!(error = %e, "clipboard set_image failed");
             } else {
                 info!(
@@ -336,6 +430,79 @@ mod tests {
             ClipChange::Image(got) => assert_eq!(got, img),
             other => panic!("expected image change, got {other:?}"),
         }
+    }
+
+    const NO_WAIT: [Duration; 3] = [Duration::ZERO; 3];
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn text_goes_through_x11_without_a_wayland_session() {
+        let probed = std::cell::Cell::new(false);
+        let writer = pick_text_writer(false, || {
+            probed.set(true);
+            true
+        });
+        assert_eq!(writer, TextWriter::X11);
+        assert!(!probed.get(), "no point probing Wayland without a session");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn text_goes_through_x11_when_arboard_falls_back_to_it() {
+        // GNOME: a Wayland session without the data-control protocol.
+        assert_eq!(pick_text_writer(true, || false), TextWriter::X11);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn text_goes_through_arboard_on_wayland_data_control() {
+        // KDE, sway, …: arboard talks Wayland natively and serves text fine.
+        assert_eq!(pick_text_writer(true, || true), TextWriter::Arboard);
+    }
+
+    #[test]
+    fn retry_succeeds_once_the_clipboard_is_released() {
+        let mut calls = 0;
+        let result = retry_while_occupied(&NO_WAIT, || {
+            calls += 1;
+            if calls < 3 {
+                Err(arboard::Error::ClipboardOccupied)
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(result.unwrap(), 3);
+    }
+
+    #[test]
+    fn retry_gives_up_after_the_last_delay() {
+        let mut calls = 0;
+        let result: Result<(), _> = retry_while_occupied(&NO_WAIT, || {
+            calls += 1;
+            Err(arboard::Error::ClipboardOccupied)
+        });
+        assert!(matches!(result, Err(arboard::Error::ClipboardOccupied)));
+        assert_eq!(calls, 1 + NO_WAIT.len());
+    }
+
+    #[test]
+    fn retry_does_not_repeat_other_errors() {
+        let mut calls = 0;
+        let result: Result<(), _> = retry_while_occupied(&NO_WAIT, || {
+            calls += 1;
+            Err(arboard::Error::ConversionFailure)
+        });
+        assert!(matches!(result, Err(arboard::Error::ConversionFailure)));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn retry_waits_between_attempts() {
+        let delays = [Duration::from_millis(30), Duration::from_millis(30)];
+        let start = Instant::now();
+        let _: Result<(), _> =
+            retry_while_occupied(&delays, || Err(arboard::Error::ClipboardOccupied));
+        assert!(start.elapsed() >= Duration::from_millis(60));
     }
 
     #[test]

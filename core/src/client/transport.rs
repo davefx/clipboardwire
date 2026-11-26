@@ -219,6 +219,13 @@ async fn run_loop(
             // close cycle is the whole job. Don't reconnect.
             return;
         }
+        if supervisor_gone(&inbound_tx, &outbound_rx) {
+            // The [`Transport`] handle was dropped (the tray aborted the
+            // supervisor on a config reload). Reconnecting would leave a
+            // zombie peer on the hub that nobody reads from.
+            debug!("transport handle dropped; transport exiting");
+            return;
+        }
         // If we held the connection for a while, the backoff resets.
         if attempt_start.elapsed() >= RESET_AFTER_STABLE {
             backoff = INITIAL_BACKOFF;
@@ -227,9 +234,24 @@ async fn run_loop(
             will_retry_in: backoff,
         });
         debug!(sleep_s = backoff.as_secs_f64(), "reconnecting");
-        tokio::time::sleep(backoff).await;
+        tokio::select! {
+            _ = tokio::time::sleep(backoff) => {}
+            _ = inbound_tx.closed() => {
+                debug!("transport handle dropped; transport exiting");
+                return;
+            }
+        }
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
+}
+
+/// True once the supervisor-facing [`Transport`] handle is gone: nobody
+/// reads inbound clips any more and nobody can send outbound ones.
+fn supervisor_gone(
+    inbound_tx: &mpsc::Sender<ClipFrame>,
+    outbound_rx: &mpsc::Receiver<ClipFrame>,
+) -> bool {
+    inbound_tx.is_closed() || outbound_rx.is_closed()
 }
 
 /// Drain any file chunks still buffered in `outbound_files_rx` to the

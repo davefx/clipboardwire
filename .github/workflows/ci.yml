@@ -42,7 +42,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-dev libayatana-appindicator3-dev libxdo-dev \
-            xvfb dbus \
+            xvfb dbus xclip \
             libxkbcommon-x11-0 libxkbcommon0 \
             libfontconfig1 \
             libgl1 libgles2 libegl1 \
@@ -65,6 +65,9 @@ jobs:
       - name: GUI interaction (embedded hub binds) — Linux
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a cargo test --workspace --test hub_mode -- --ignored
+      - name: Text clips readable in every advertised X11 format — Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: env -u WAYLAND_DISPLAY xvfb-run -a cargo test -p clipboardwire-core --test x11_text_targets -- --ignored
       - name: GUI smoke (tray init) — Windows
         if: matrix.os == 'windows-latest'
         run: cargo test --workspace -- --ignored connect_tray

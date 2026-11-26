@@ -4,6 +4,27 @@ All notable changes to clipboardwire are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Fixed
+- **Linux: text received from another machine now pastes in Firefox.**
+  On X11 and on GNOME/Wayland (where the clipboard goes through
+  XWayland), arboard advertised `text/plain;charset=utf-8` and
+  `text/plain;charset=UTF-8` but only served `UTF8_STRING`. Firefox
+  asked for one of the broken formats and pasted nothing, while
+  terminals worked. Text is now written by clipboardwire's own X11
+  selection owner, which advertises only what it serves. Native Wayland
+  data-control sessions (KDE, sway, …) keep using arboard.
+- **Client: no more zombie connections after a config reload.** Closing
+  Settings or "Reload config" left the old transport running; it
+  reconnected to the hub every minute with a new client id for as long
+  as the app stayed open. The transport now stops as soon as its
+  supervisor is gone.
+- **Windows: clips are no longer lost while another program holds the
+  clipboard.** Writing a received clip now retries for about 2.5 s when
+  the clipboard is busy ("held by another party") instead of dropping
+  it.
+
 ## [0.5.6] — 2026-11-25
 
 ### Fixed

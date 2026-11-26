@@ -9,6 +9,8 @@ pub mod file;
 pub mod files_clipboard;
 pub mod tls;
 pub mod transport;
+#[cfg(target_os = "linux")]
+mod x11_selection;
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
